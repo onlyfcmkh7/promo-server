@@ -4,10 +4,9 @@ const cheerio = require("cheerio");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-const ATB_PROMO_URLS = [
+const PROMO_URLS = [
   "https://www.atbmarket.com/promo/all?filter=0",
   "https://www.atbmarket.com/promo/sim_dniv",
-  "https://www.atbmarket.com/promo/sale_tovari",
   "https://promo.atbmarket.com/"
 ];
 
@@ -19,8 +18,12 @@ const DEFAULT_HEADERS = {
   "Accept-Language": "uk-UA,uk;q=0.9,en-US;q=0.8,en;q=0.7",
   "Cache-Control": "no-cache",
   "Pragma": "no-cache",
-  "Referer": "https://www.atbmarket.com/",
-  "Origin": "https://www.atbmarket.com"
+  "Referer": "https://www.atbmarket.com/"
+};
+
+let cache = {
+  updatedAt: 0,
+  items: []
 };
 
 function normalizeSpaces(value) {
@@ -31,7 +34,8 @@ function parsePrice(value) {
   if (!value) return null;
 
   const cleaned = String(value)
-    .replace(/\s/g, "")
+    .replace(/\u00A0/g, " ")
+    .replace(/\s+/g, "")
     .replace(",", ".")
     .match(/\d+(?:\.\d+)?/);
 
@@ -41,76 +45,106 @@ function parsePrice(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function extractBrand(title) {
-  const safeTitle = normalizeSpaces(title);
-  if (!safeTitle) return null;
-  return safeTitle.split(" ").slice(0, 2).join(" ").trim();
-}
-
 function detectCategory(title) {
-  const value = normalizeSpaces(title).toLowerCase();
+  const text = normalizeSpaces(title).toLowerCase();
 
   if (
-    value.includes("молоко") ||
-    value.includes("кефір") ||
-    value.includes("сметана") ||
-    value.includes("ряжанка") ||
-    value.includes("йогурт") ||
-    value.includes("сир ")
+    text.includes("молоко") ||
+    text.includes("кефір") ||
+    text.includes("сметана") ||
+    text.includes("ряжанка") ||
+    text.includes("йогурт") ||
+    text.includes("сир")
   ) return "dairy";
 
   if (
-    value.includes("хліб") ||
-    value.includes("батон") ||
-    value.includes("лаваш") ||
-    value.includes("булочки")
+    text.includes("хліб") ||
+    text.includes("батон") ||
+    text.includes("лаваш") ||
+    text.includes("булоч")
   ) return "bread";
 
   if (
-    value.includes("куря") ||
-    value.includes("курче") ||
-    value.includes("філе") ||
-    value.includes("гомілка") ||
-    value.includes("стегно") ||
-    value.includes("крило")
+    text.includes("кур") ||
+    text.includes("філе") ||
+    text.includes("гомілка") ||
+    text.includes("стегно") ||
+    text.includes("крило")
   ) return "chicken";
 
-  if (value.includes("кетчуп") || value.includes("соус")) return "ketchup";
-
-  if (value.includes("олія")) return "oil";
-
-  if (value.includes("шоколад")) return "chocolate";
-
-  if (value.includes("вода")) return "water";
+  if (text.includes("кетчуп") || text.includes("соус")) return "ketchup";
+  if (text.includes("олія")) return "oil";
+  if (text.includes("шоколад")) return "chocolate";
+  if (text.includes("вода")) return "water";
 
   if (
-    value.includes("пиво") ||
-    value.includes("сидр") ||
-    value.includes("віскі") ||
-    value.includes("горілка") ||
-    value.includes("вино") ||
-    value.includes("слабоалкоголь")
+    text.includes("пиво") ||
+    text.includes("сидр") ||
+    text.includes("віскі") ||
+    text.includes("горілка") ||
+    text.includes("вино") ||
+    text.includes("слабоалког")
   ) return "alcohol";
 
   return "other";
 }
 
-function buildPromotion({
-  id,
-  title,
-  price,
-  oldPrice,
-  imageUrl,
-  createdAt,
-  category
-}) {
+function extractBrand(title) {
+  const text = normalizeSpaces(title);
+  if (!text) return null;
+
+  const knownBrands = [
+    "Яготинське",
+    "Галичина",
+    "Простоквашино",
+    "Київхліб",
+    "Кулиничі",
+    "Хлібодар",
+    "Наша Ряба",
+    "Гаврилівські курчата",
+    "Чумак",
+    "Торчин",
+    "Олейна",
+    "Щедрий Дар",
+    "Корона",
+    "Roshen",
+    "Millennium",
+    "Моршинська",
+    "BonAqua",
+    "Карпатська Джерельна",
+    "Оболонь",
+    "Чернігівське",
+    "Львівське",
+    "Stella Artois",
+    "Corona Extra",
+    "Garage",
+    "Revo",
+    "Shabo",
+    "Koblevo",
+    "Nemiroff",
+    "Хортиця",
+    "Absolut",
+    "Jameson",
+    "Jack Daniel's"
+  ];
+
+  const found = knownBrands.find((brand) =>
+    text.toLowerCase().startsWith(brand.toLowerCase())
+  );
+
+  if (found) return found;
+
+  return text.split(" ").slice(0, 2).join(" ").trim();
+}
+
+function buildPromotion(id, title, price, oldPrice, imageUrl) {
   const safeTitle = normalizeSpaces(title);
   if (!safeTitle || price == null) return null;
 
   return {
     id: String(id),
     storeId: 1,
-    category: category || detectCategory(safeTitle),
+    category: detectCategory(safeTitle),
     brand: extractBrand(safeTitle),
     title: safeTitle,
     price,
@@ -119,164 +153,135 @@ function buildPromotion({
       oldPrice && oldPrice > price
         ? Math.round(((oldPrice - price) / oldPrice) * 100)
         : null,
-    createdAt: createdAt || Date.now(),
+    createdAt: Date.now(),
     imageUrl: imageUrl || null
   };
 }
 
 async function fetchHtml(url) {
-  const response = await fetch(url, {
-    headers: DEFAULT_HEADERS
-  });
+  const response = await fetch(url, { headers: DEFAULT_HEADERS });
 
   if (!response.ok) {
     throw new Error(`HTTP ${response.status} for ${url}`);
   }
 
-  return response.text();
+  return await response.text();
 }
 
-function extractFromJsonScripts(html) {
+function extractPromotionsFromHtml(html) {
   const $ = cheerio.load(html);
-  const items = [];
+  const results = [];
+  const seen = new Set();
 
-  $("script").each((_, el) => {
-    const text = $(el).html() || "";
-
-    if (!text) return;
-
-    const priceMatches = text.match(/"price"\s*:\s*"?\d+[.,]?\d*"?/g);
-    const titleMatches = text.match(/"name"\s*:\s*"([^"]+)"/g);
-
-    if (!priceMatches || !titleMatches) return;
-
-    const names = titleMatches
-      .map(x => x.match(/"name"\s*:\s*"([^"]+)"/)?.[1])
-      .filter(Boolean);
-
-    const prices = priceMatches
-      .map(x => parsePrice(x))
-      .filter(x => x != null);
-
-    for (let i = 0; i < Math.min(names.length, prices.length); i++) {
-      items.push({
-        title: names[i],
-        price: prices[i],
-        oldPrice: null,
-        imageUrl: null,
-        createdAt: Date.now()
-      });
-    }
-  });
-
-  return items;
-}
-
-function extractFromDom(html) {
-  const $ = cheerio.load(html);
-  const items = [];
-
-  const cardSelectors = [
-    "[class*='product']",
+  const selectors = [
     "[class*='promo']",
+    "[class*='product']",
     "[class*='card']",
     "[class*='item']",
     "article",
-    ".swiper-slide"
+    ".swiper-slide",
+    "li"
   ];
 
-  const seen = new Set();
-
-  cardSelectors.forEach(selector => {
+  selectors.forEach((selector) => {
     $(selector).each((_, el) => {
       const root = $(el);
 
-      const title =
-        normalizeSpaces(
-          root.find("h1, h2, h3, h4, [class*='title'], [class*='name']").first().text()
-        ) ||
-        normalizeSpaces(root.text()).slice(0, 160);
+      const title = normalizeSpaces(
+        root.find("h1,h2,h3,h4,[class*='title'],[class*='name']").first().text()
+      );
 
-      const rawPrices = [];
-      root.find("[class*='price'], [class*='cost'], [class*='old']").each((__, priceEl) => {
-        const price = parsePrice($(priceEl).text());
-        if (price != null) rawPrices.push(price);
+      if (!title || title.length < 5) return;
+
+      const priceCandidates = [];
+
+      root.find("[class*='price'], [class*='old'], [class*='cost']").each((__, priceEl) => {
+        const value = parsePrice($(priceEl).text());
+        if (value != null) priceCandidates.push(value);
       });
 
-      const uniqPrices = [...new Set(rawPrices)];
-      const currentPrice = uniqPrices.length > 0 ? Math.min(...uniqPrices) : null;
-      const oldPrice = uniqPrices.length > 1 ? Math.max(...uniqPrices) : null;
+      const textPriceMatches = normalizeSpaces(root.text()).match(/\d+[.,]?\d*/g) || [];
+      textPriceMatches.forEach((p) => {
+        const value = parsePrice(p);
+        if (value != null) priceCandidates.push(value);
+      });
+
+      const uniquePrices = [...new Set(priceCandidates)].filter((v) => v > 0 && v < 5000);
+
+      if (uniquePrices.length === 0) return;
+
+      const price = Math.min(...uniquePrices);
+      const oldPrice = uniquePrices.length > 1 ? Math.max(...uniquePrices) : null;
 
       const imageUrl =
         root.find("img").first().attr("src") ||
         root.find("img").first().attr("data-src") ||
         null;
 
-      if (!title || currentPrice == null) return;
-
-      const key = `${title}_${currentPrice}_${oldPrice || "n"}`;
+      const key = `${title}_${price}_${oldPrice || "n"}`;
       if (seen.has(key)) return;
       seen.add(key);
 
-      items.push({
-        title,
-        price: currentPrice,
-        oldPrice,
-        imageUrl,
-        createdAt: Date.now()
-      });
+      const promo = buildPromotion(seen.size, title, price, oldPrice, imageUrl);
+      if (promo) results.push(promo);
     });
   });
 
-  return items;
+  return results;
 }
 
-async function scrapeAtbPromotions() {
-  let rawItems = [];
+async function loadPromotions() {
+  const now = Date.now();
 
-  for (const url of ATB_PROMO_URLS) {
+  if (now - cache.updatedAt < 10 * 60 * 1000 && cache.items.length > 0) {
+    return cache.items;
+  }
+
+  let all = [];
+
+  for (const url of PROMO_URLS) {
     try {
       const html = await fetchHtml(url);
-      const domItems = extractFromDom(html);
-      const jsonItems = extractFromJsonScripts(html);
-      rawItems = [...rawItems, ...domItems, ...jsonItems];
+      const items = extractPromotionsFromHtml(html);
+      all = all.concat(items);
     } catch (error) {
-      console.error(`Failed to fetch ${url}:`, error.message);
+      console.error("PROMO FETCH ERROR:", url, error.message);
     }
   }
 
   const unique = new Map();
 
-  rawItems.forEach((item, index) => {
-    const promo = buildPromotion({
-      id: index + 1,
-      ...item
-    });
+  all.forEach((item, index) => {
+    const normalized = {
+      ...item,
+      id: String(index + 1)
+    };
 
-    if (!promo) return;
-
-    const key = `${promo.title}_${promo.price}_${promo.oldPrice || "n"}`;
+    const key = `${normalized.title}_${normalized.price}_${normalized.oldPrice || "n"}`;
     if (!unique.has(key)) {
-      unique.set(key, promo);
+      unique.set(key, normalized);
     }
   });
 
-  const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  const finalItems = [...unique.values()]
+    .filter((item) => item.oldPrice == null || item.oldPrice > item.price);
 
-  return [...unique.values()]
-    .filter(item => item.createdAt >= sevenDaysAgo)
-    .filter(item => item.oldPrice == null || item.oldPrice > item.price);
+  cache = {
+    updatedAt: now,
+    items: finalItems
+  };
+
+  return finalItems;
 }
 
 app.get("/promotions/atb", async (req, res) => {
   try {
-    const promotions = await scrapeAtbPromotions();
+    const promotions = await loadPromotions();
     res.json(promotions);
   } catch (error) {
-    console.error("ATB scrape error:", error);
+    console.error("ATB ERROR:", error);
     res.status(500).json({
-      error: "Failed to load ATB promotions",
-      details: error.message
+      error: "Failed to load ATB promotions"
     });
   }
 });
