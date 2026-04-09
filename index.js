@@ -37,7 +37,6 @@ const catalog = [
       { name: "йогурт натуральний 270г", minOldPrice: 25, maxOldPrice: 35 }
     ]
   },
-
   {
     category: "bread",
     brand: "Київхліб",
@@ -65,7 +64,6 @@ const catalog = [
       { name: "булочки для бургерів 320г", minOldPrice: 24, maxOldPrice: 34 }
     ]
   },
-
   {
     category: "chicken",
     brand: "Наша Ряба",
@@ -84,7 +82,6 @@ const catalog = [
       { name: "тушка куряча 1.7кг", minOldPrice: 132, maxOldPrice: 166 }
     ]
   },
-
   {
     category: "ketchup",
     brand: "Чумак",
@@ -103,7 +100,6 @@ const catalog = [
       { name: "кетчуп шашличний 270г", minOldPrice: 29, maxOldPrice: 41 }
     ]
   },
-
   {
     category: "oil",
     brand: "Олейна",
@@ -120,7 +116,6 @@ const catalog = [
       { name: "олія дезодорована 1л", minOldPrice: 65, maxOldPrice: 83 }
     ]
   },
-
   {
     category: "chocolate",
     brand: "Корона",
@@ -145,7 +140,6 @@ const catalog = [
       { name: "шоколад білий 90г", minOldPrice: 34, maxOldPrice: 48 }
     ]
   },
-
   {
     category: "water",
     brand: "Моршинська",
@@ -170,7 +164,6 @@ const catalog = [
       { name: "вода мінеральна негазована 1.5л", minOldPrice: 20, maxOldPrice: 29 }
     ]
   },
-
   {
     category: "alcohol",
     brand: "Оболонь",
@@ -306,6 +299,13 @@ function buildPrices(minOldPrice, maxOldPrice, seed) {
   };
 }
 
+function buildCreatedAt(id) {
+  const now = Date.now();
+  const maxAge = 14 * 24 * 60 * 60 * 1000;
+  const offset = (id * 987654) % maxAge;
+  return now - offset;
+}
+
 function buildAtbPromotions() {
   const items = [];
   let id = 1;
@@ -328,6 +328,7 @@ function buildAtbPromotions() {
         price,
         oldPrice,
         discountPercent,
+        createdAt: buildCreatedAt(id),
         imageUrl: null
       });
 
@@ -335,7 +336,9 @@ function buildAtbPromotions() {
     });
   });
 
-  return items;
+  const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+
+  return items.filter(item => item.createdAt >= sevenDaysAgo);
 }
 
 app.get("/promotions/atb", (req, res) => {
