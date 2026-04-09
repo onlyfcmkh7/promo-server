@@ -9,19 +9,14 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
 
-/**
- * Офіційні сторінки АТБ з акційними товарами.
- */
 const ATB_PROMO_URLS = [
   "https://www.atbmarket.com/promo/sale_tovari",
   "https://www.atbmarket.com/catalog/economy",
   "https://www.atbmarket.com/catalog/388-aktsiya-7-dniv",
-  "https://www.atbmarket.com/catalog/aktsiya",
-  "https://www.atbmarket.com/catalog/novynky",
 ];
 
 const STORE_ID = 1;
-const CACHE_TTL_MS = 10 * 60 * 1000; // 10 хв
+const CACHE_TTL_MS = 10 * 60 * 1000;
 
 let cache = {
   at: 0,
@@ -41,9 +36,7 @@ function normalizeWhitespace(value) {
 
 function parsePrice(value) {
   if (!value) return null;
-  const normalized = String(value)
-    .replace(",", ".")
-    .replace(/[^\d.]/g, "");
+  const normalized = String(value).replace(",", ".").replace(/[^\d.]/g, "");
   const parsed = Number(normalized);
   return Number.isFinite(parsed) ? parsed : null;
 }
@@ -81,11 +74,8 @@ function parseDdMm(ddmm) {
   if (Number.isNaN(d.getTime())) return null;
 
   const diffDays = Math.round((d.getTime() - now.getTime()) / 86400000);
-  if (diffDays < -330) {
-    d.setFullYear(year + 1);
-  } else if (diffDays > 330) {
-    d.setFullYear(year - 1);
-  }
+  if (diffDays < -330) d.setFullYear(year + 1);
+  if (diffDays > 330) d.setFullYear(year - 1);
 
   return d;
 }
@@ -101,7 +91,6 @@ function isWithinNext7Days(date) {
   ).getTime();
 
   const endLimit = startOfToday + 7 * 24 * 60 * 60 * 1000;
-
   return date.getTime() >= startOfToday && date.getTime() <= endLimit;
 }
 
@@ -124,9 +113,9 @@ function detectCategory(title) {
     ["alcohol", /(пиво|вино|горілка|бренді|коньяк|віскі|ром|джин|лікер|вермут|ігристе|слабоалкоголь)/],
     ["snacks", /(чипси|снеки|горішк|сухофрукт|крекер|батончик|попкорн|кукурудзян|насіння)/],
     ["sweets", /(цукерк|шоколад|десерт|зефір|мармелад|драже|паста шоколадно|печиво)/],
-    ["baby", /(gerber|дитяч|пюре|підгузк|суміш)/],
-    ["household", /(порошок|миюч|засіб|серветки|рушники|туалетний папір|пластир|ватні палички|дезодорант|шампунь|крем|мило)/],
-    ["groceries", /(консерви|крупи|макарон|майонез|соус|кетчуп|олія|оцет|приправ|булгур|рис|греч|борошно|цукор|сіль|чай)/],
+    ["baby", /(gerber|galicia baby|дитяч|пюре|підгузк|суміш)/],
+    ["household", /(порошок|миюч|засіб|серветки|рушники|туалетний папір|ватні палички|дезодорант|шампунь|крем|мило)/],
+    ["groceries", /(консерви|крупи|макарон|майонез|соус|кетчуп|олія|оцет|приправ|булгур|рис|греч|борошно|цукор|сіль|чай|кава)/],
   ];
 
   for (const [category, regex] of rules) {
@@ -140,50 +129,28 @@ function extractBrand(title) {
   const original = normalizeWhitespace(title);
   if (!original) return "Unknown";
 
-  const multiWordCandidates = [
+  const knownBrands = [
     "Своя Лінія",
+    "Своя лінія",
     "Розумний Вибір",
-    "Revers Cosmetics",
-    "Black Royal Tea",
+    "Gerber",
+    "Galicia BABY",
+    "Savex",
+    "Dallmayr",
+    "Tea Moments",
+    "DAS IST",
+    "Saint Remy",
+    "Hyleys",
+    "Jacobs",
   ];
 
-  for (const candidate of multiWordCandidates) {
-    const re = new RegExp(candidate, "i");
-    if (re.test(original)) {
-      return candidate
-        .replace("Вибір", "вибір")
-        .replace("Лінія", "Лінія");
-    }
+  for (const brand of knownBrands) {
+    const re = new RegExp(brand.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+    if (re.test(original)) return brand;
   }
 
-  const genericWords = new Set([
-    "Морська", "Капуста", "Напій", "Бренді", "Консерви", "Чай", "Добавка",
-    "Кава", "Крем", "Пельмені", "Чипси", "Кульки", "Батончик", "Набір",
-    "Пюре", "Порошок", "Горілка", "Вода", "Сік", "Молоко", "Йогурт",
-    "Сметана", "Сир", "Сирок", "Цукерки", "Шоколад", "Печиво",
-  ]);
-
-  const matches = [...original.matchAll(/\b[А-ЯІЇЄҐA-Z][A-Za-zА-Яа-яІіЇїЄєҐґ'’.-]+(?:\s+[А-ЯІЇЄҐA-Z][A-Za-zА-Яа-яІіЇїЄєҐґ'’.-]+){0,2}/g)]
-    .map((m) => normalizeWhitespace(m[0]))
-    .filter(Boolean);
-
-  const filtered = matches.filter((m) => {
-    const first = m.split(" ")[0];
-    return !genericWords.has(first);
-  });
-
-  if (filtered.length > 0) {
-    filtered.sort((a, b) => b.length - a.length);
-    return filtered[0];
-  }
-
-  const afterUnits = original
-    .replace(/\b\d+[.,]?\d*\s?(кг|г|л|мл|шт|таб|капс|уп|пак|пет)\b/gi, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  const word = afterUnits.split(" ").find((w) => /^[A-ZА-ЯІЇЄҐ]/.test(w));
-  return word || "Unknown";
+  const words = original.split(" ");
+  return words[0] || "Unknown";
 }
 
 async function autoScroll(page) {
@@ -221,9 +188,7 @@ async function accept18PlusIfNeeded(page) {
         await sleep(800);
         break;
       }
-    } catch (_) {
-      // ignore
-    }
+    } catch (_) {}
   }
 }
 
@@ -255,10 +220,14 @@ async function extractPromoItemsFromPage(page, sourceUrl) {
 
       while (current) {
         const t = text(current);
-        const hasPrice = /\d+[.,]\d{2}/i.test(t);
-        const hasDiscount = /-\d+%/.test(t);
 
-        if (hasPrice || hasDiscount) return current;
+        if (
+          /\d+[.,]\d{2}\s*грн\/шт/i.test(t) ||
+          /-\d+%/.test(t)
+        ) {
+          return current;
+        }
+
         current = current.parentElement;
       }
 
@@ -295,22 +264,23 @@ async function extractPromoItemsFromPage(page, sourceUrl) {
       const card = findCard(link);
       const cardText = text(card);
 
-      const prices = [...cardText.matchAll(/(\d+[.,]\d{2})/g)].map((m) => m[1]);
+      // Беремо тільки формат "нова ціна грн/шт стара ціна"
+      const priceMatch = cardText.match(
+        /(\d+[.,]\d{2})\s*грн\/шт\s*(\d+[.,]\d{2})/i
+      );
+
       const discountMatch = cardText.match(/-(\d+)%/);
       const endDateMatch = cardText.match(/до\s*(\d{2}\.\d{2})/i);
 
-      const priceText = prices[0] || null;
-      const oldPriceText = prices[1] || null;
-
-      if (!priceText) continue;
+      if (!priceMatch) continue;
 
       result.push({
         href,
         title,
         cardText,
         imageUrl: getImage(card),
-        priceText,
-        oldPriceText,
+        priceText: priceMatch[1],
+        oldPriceText: priceMatch[2],
         discountText: discountMatch ? discountMatch[1] : null,
         endDateText: endDateMatch ? endDateMatch[1] : null,
       });
@@ -331,11 +301,11 @@ function normalizeAtbItems(rawItems) {
     const oldPrice = parsePrice(raw.oldPriceText);
 
     if (!title) continue;
-    if (!Number.isFinite(price)) continue;
+    if (!Number.isFinite(price) || !Number.isFinite(oldPrice)) continue;
+    if (!(oldPrice > price)) continue;
 
-    const safeOldPrice = Number.isFinite(oldPrice) ? oldPrice : price;
     const discountPercent =
-      computeDiscountPercent(price, safeOldPrice, raw.discountText) || 0;
+      computeDiscountPercent(price, oldPrice, raw.discountText) || 0;
 
     const endDate = parseDdMm(raw.endDateText);
     if (raw.endDateText && !isWithinNext7Days(endDate)) {
@@ -349,7 +319,7 @@ function normalizeAtbItems(rawItems) {
       brand: extractBrand(title),
       title,
       price,
-      oldPrice: safeOldPrice,
+      oldPrice,
       discountPercent,
       createdAt: inferCreatedAt(endDate),
       imageUrl: raw.imageUrl || "",
