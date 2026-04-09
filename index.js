@@ -3,314 +3,328 @@ const express = require("express");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-const categoryConfigs = [
+const catalog = [
   {
-    key: "dairy",
-    brands: ["Яготинське", "Галичина", "Простоквашино"],
-    products: [
-      { type: "молоко", variants: ["2.5% 900мл", "3.2% 900мл", "1% 900мл", "2.6% 870мл"] },
-      { type: "кефір", variants: ["1% 900г", "2.5% 900г", "2.5% 850г"] },
-      { type: "сметана", variants: ["15% 300г", "20% 300г", "21% 350г"] },
-      { type: "ряжанка", variants: ["4% 500г", "2.5% 850г"] },
-      { type: "йогурт", variants: ["натуральний 270г", "полуниця 250г", "персик 250г"] }
+    category: "dairy",
+    brand: "Яготинське",
+    items: [
+      { name: "молоко 2.5% 900мл", minOldPrice: 42, maxOldPrice: 56 },
+      { name: "молоко 3.2% 900мл", minOldPrice: 44, maxOldPrice: 58 },
+      { name: "кефір 2.5% 900г", minOldPrice: 38, maxOldPrice: 50 },
+      { name: "сметана 15% 300г", minOldPrice: 34, maxOldPrice: 46 },
+      { name: "ряжанка 4% 500г", minOldPrice: 32, maxOldPrice: 42 }
     ]
   },
   {
-    key: "bread",
-    brands: ["Київхліб", "Кулиничі", "Хлібодар"],
-    products: [
-      { type: "хліб білий", variants: ["500г", "650г"] },
-      { type: "хліб житній", variants: ["600г", "700г"] },
-      { type: "батон нарізний", variants: ["450г", "500г"] },
-      { type: "лаваш", variants: ["200г", "250г"] },
-      { type: "булочки для бургерів", variants: ["300г", "320г"] }
+    category: "dairy",
+    brand: "Галичина",
+    items: [
+      { name: "молоко 3.2% 900мл", minOldPrice: 43, maxOldPrice: 57 },
+      { name: "кефір 2.5% 850г", minOldPrice: 37, maxOldPrice: 49 },
+      { name: "сметана 20% 300г", minOldPrice: 36, maxOldPrice: 48 },
+      { name: "ряжанка 2.5% 850г", minOldPrice: 38, maxOldPrice: 50 },
+      { name: "йогурт персик 250г", minOldPrice: 24, maxOldPrice: 34 }
     ]
   },
   {
-    key: "chicken",
-    brands: ["Наша Ряба", "Гаврилівські курчата"],
-    products: [
-      { type: "філе куряче", variants: ["1кг", "900г"] },
-      { type: "стегно куряче", variants: ["1кг"] },
-      { type: "гомілка куряча", variants: ["1кг"] },
-      { type: "крило куряче", variants: ["1кг"] },
-      { type: "тушка куряча", variants: ["1.5кг", "1.7кг"] }
+    category: "dairy",
+    brand: "Простоквашино",
+    items: [
+      { name: "молоко 1% 900мл", minOldPrice: 41, maxOldPrice: 54 },
+      { name: "кефір 1% 900г", minOldPrice: 36, maxOldPrice: 48 },
+      { name: "сметана 20% 300г", minOldPrice: 35, maxOldPrice: 47 },
+      { name: "ряжанка 2.5% 850г", minOldPrice: 37, maxOldPrice: 49 },
+      { name: "йогурт натуральний 270г", minOldPrice: 25, maxOldPrice: 35 }
     ]
   },
-  {
-    key: "ketchup",
-    brands: ["Чумак", "Торчин"],
-    products: [
-      { type: "кетчуп класичний", variants: ["300г", "500г"] },
-      { type: "кетчуп лагідний", variants: ["300г"] },
-      { type: "кетчуп шашличний", variants: ["270г", "300г"] },
-      { type: "кетчуп томатний", variants: ["500г"] }
-    ]
-  },
-  {
-    key: "oil",
-    brands: ["Олейна", "Щедрий Дар"],
-    products: [
-      { type: "олія соняшникова", variants: ["850мл", "1л"] },
-      { type: "олія рафінована", variants: ["850мл", "1л"] },
-      { type: "олія дезодорована", variants: ["850мл", "1л"] }
-    ]
-  },
-  {
-    key: "chocolate",
-    brands: ["Корона", "Roshen", "Millennium"],
-    products: [
-      { type: "шоколад молочний", variants: ["90г", "100г"] },
-      { type: "шоколад чорний", variants: ["85г", "90г"] },
-      { type: "шоколад білий", variants: ["90г"] },
-      { type: "шоколад з горіхами", variants: ["90г", "100г"] }
-    ]
-  },
-  {
-    key: "water",
-    brands: ["Моршинська", "BonAqua", "Карпатська Джерельна"],
-    products: [
-      { type: "вода негазована", variants: ["1.5л", "2л"] },
-      { type: "вода слабогазована", variants: ["1.5л"] },
-      { type: "вода сильногазована", variants: ["1.5л"] },
-      { type: "вода мінеральна негазована", variants: ["1.5л"] }
-    ]
-  }
-];
 
-const alcoholCatalog = [
   {
+    category: "bread",
+    brand: "Київхліб",
+    items: [
+      { name: "хліб білий 500г", minOldPrice: 22, maxOldPrice: 32 },
+      { name: "хліб житній 600г", minOldPrice: 24, maxOldPrice: 34 },
+      { name: "батон нарізний 500г", minOldPrice: 21, maxOldPrice: 30 }
+    ]
+  },
+  {
+    category: "bread",
+    brand: "Кулиничі",
+    items: [
+      { name: "хліб білий 500г", minOldPrice: 21, maxOldPrice: 31 },
+      { name: "батон нарізний 450г", minOldPrice: 20, maxOldPrice: 29 },
+      { name: "лаваш 250г", minOldPrice: 20, maxOldPrice: 28 }
+    ]
+  },
+  {
+    category: "bread",
+    brand: "Хлібодар",
+    items: [
+      { name: "хліб житній 600г", minOldPrice: 23, maxOldPrice: 33 },
+      { name: "хліб білий 650г", minOldPrice: 24, maxOldPrice: 35 },
+      { name: "булочки для бургерів 320г", minOldPrice: 24, maxOldPrice: 34 }
+    ]
+  },
+
+  {
+    category: "chicken",
+    brand: "Наша Ряба",
+    items: [
+      { name: "філе куряче 1кг", minOldPrice: 155, maxOldPrice: 189 },
+      { name: "стегно куряче 1кг", minOldPrice: 118, maxOldPrice: 149 },
+      { name: "гомілка куряча 1кг", minOldPrice: 102, maxOldPrice: 132 }
+    ]
+  },
+  {
+    category: "chicken",
+    brand: "Гаврилівські курчата",
+    items: [
+      { name: "філе куряче 900г", minOldPrice: 145, maxOldPrice: 178 },
+      { name: "крило куряче 1кг", minOldPrice: 92, maxOldPrice: 122 },
+      { name: "тушка куряча 1.7кг", minOldPrice: 132, maxOldPrice: 166 }
+    ]
+  },
+
+  {
+    category: "ketchup",
+    brand: "Чумак",
+    items: [
+      { name: "кетчуп класичний 300г", minOldPrice: 28, maxOldPrice: 40 },
+      { name: "кетчуп шашличний 300г", minOldPrice: 30, maxOldPrice: 42 },
+      { name: "кетчуп томатний 500г", minOldPrice: 36, maxOldPrice: 49 }
+    ]
+  },
+  {
+    category: "ketchup",
+    brand: "Торчин",
+    items: [
+      { name: "кетчуп лагідний 300г", minOldPrice: 27, maxOldPrice: 39 },
+      { name: "кетчуп класичний 300г", minOldPrice: 28, maxOldPrice: 40 },
+      { name: "кетчуп шашличний 270г", minOldPrice: 29, maxOldPrice: 41 }
+    ]
+  },
+
+  {
+    category: "oil",
+    brand: "Олейна",
+    items: [
+      { name: "олія соняшникова 850мл", minOldPrice: 62, maxOldPrice: 79 },
+      { name: "олія рафінована 1л", minOldPrice: 66, maxOldPrice: 84 }
+    ]
+  },
+  {
+    category: "oil",
+    brand: "Щедрий Дар",
+    items: [
+      { name: "олія соняшникова 1л", minOldPrice: 64, maxOldPrice: 82 },
+      { name: "олія дезодорована 1л", minOldPrice: 65, maxOldPrice: 83 }
+    ]
+  },
+
+  {
+    category: "chocolate",
+    brand: "Корона",
+    items: [
+      { name: "шоколад молочний 90г", minOldPrice: 36, maxOldPrice: 52 },
+      { name: "шоколад чорний 85г", minOldPrice: 38, maxOldPrice: 54 }
+    ]
+  },
+  {
+    category: "chocolate",
+    brand: "Roshen",
+    items: [
+      { name: "шоколад молочний 90г", minOldPrice: 34, maxOldPrice: 49 },
+      { name: "шоколад з горіхами 100г", minOldPrice: 38, maxOldPrice: 55 }
+    ]
+  },
+  {
+    category: "chocolate",
+    brand: "Millennium",
+    items: [
+      { name: "шоколад чорний 90г", minOldPrice: 35, maxOldPrice: 50 },
+      { name: "шоколад білий 90г", minOldPrice: 34, maxOldPrice: 48 }
+    ]
+  },
+
+  {
+    category: "water",
+    brand: "Моршинська",
+    items: [
+      { name: "вода негазована 1.5л", minOldPrice: 19, maxOldPrice: 28 },
+      { name: "вода слабогазована 1.5л", minOldPrice: 19, maxOldPrice: 28 }
+    ]
+  },
+  {
+    category: "water",
+    brand: "BonAqua",
+    items: [
+      { name: "вода негазована 2л", minOldPrice: 23, maxOldPrice: 34 },
+      { name: "вода сильногазована 1.5л", minOldPrice: 21, maxOldPrice: 31 }
+    ]
+  },
+  {
+    category: "water",
+    brand: "Карпатська Джерельна",
+    items: [
+      { name: "вода негазована 1.5л", minOldPrice: 18, maxOldPrice: 27 },
+      { name: "вода мінеральна негазована 1.5л", minOldPrice: 20, maxOldPrice: 29 }
+    ]
+  },
+
+  {
+    category: "alcohol",
     brand: "Оболонь",
-    products: [
-      { type: "пиво світле", variants: ["0.5л", "1л"] },
-      { type: "пиво нефільтроване", variants: ["0.5л"] }
+    items: [
+      { name: "пиво світле 0.5л", minOldPrice: 30, maxOldPrice: 42 },
+      { name: "пиво нефільтроване 0.5л", minOldPrice: 32, maxOldPrice: 45 }
     ]
   },
   {
+    category: "alcohol",
     brand: "Чернігівське",
-    products: [
-      { type: "пиво світле", variants: ["0.5л", "1л"] },
-      { type: "пиво lager", variants: ["0.5л"] }
+    items: [
+      { name: "пиво світле 0.5л", minOldPrice: 31, maxOldPrice: 44 },
+      { name: "пиво lager 0.5л", minOldPrice: 33, maxOldPrice: 46 }
     ]
   },
   {
+    category: "alcohol",
     brand: "Львівське",
-    products: [
-      { type: "пиво світле", variants: ["0.5л", "1л"] },
-      { type: "пиво нефільтроване", variants: ["0.5л"] }
+    items: [
+      { name: "пиво світле 0.5л", minOldPrice: 30, maxOldPrice: 43 },
+      { name: "пиво нефільтроване 0.5л", minOldPrice: 32, maxOldPrice: 45 }
     ]
   },
   {
+    category: "alcohol",
     brand: "Stella Artois",
-    products: [
-      { type: "пиво lager", variants: ["0.5л"] }
+    items: [
+      { name: "пиво lager 0.5л", minOldPrice: 42, maxOldPrice: 58 }
     ]
   },
   {
+    category: "alcohol",
     brand: "Corona Extra",
-    products: [
-      { type: "пиво світле", variants: ["0.33л", "0.5л"] }
+    items: [
+      { name: "пиво світле 0.33л", minOldPrice: 46, maxOldPrice: 64 }
     ]
   },
   {
+    category: "alcohol",
     brand: "Garage",
-    products: [
-      { type: "сидр", variants: ["0.4л", "0.5л"] }
+    items: [
+      { name: "сидр 0.44л", minOldPrice: 38, maxOldPrice: 54 }
     ]
   },
   {
+    category: "alcohol",
     brand: "Revo",
-    products: [
-      { type: "напій слабоалкогольний", variants: ["0.33л", "0.5л"] }
+    items: [
+      { name: "напій слабоалкогольний 0.5л", minOldPrice: 39, maxOldPrice: 55 }
     ]
   },
   {
+    category: "alcohol",
     brand: "Shabo",
-    products: [
-      { type: "вино біле сухе", variants: ["0.75л"] },
-      { type: "вино червоне напівсолодке", variants: ["0.75л"] }
+    items: [
+      { name: "вино біле сухе 0.75л", minOldPrice: 155, maxOldPrice: 260 },
+      { name: "вино червоне напівсолодке 0.75л", minOldPrice: 165, maxOldPrice: 270 }
     ]
   },
   {
+    category: "alcohol",
     brand: "Koblevo",
-    products: [
-      { type: "вино біле сухе", variants: ["0.75л"] },
-      { type: "вино червоне напівсолодке", variants: ["0.75л"] }
+    items: [
+      { name: "вино біле сухе 0.75л", minOldPrice: 145, maxOldPrice: 235 },
+      { name: "вино червоне напівсолодке 0.75л", minOldPrice: 150, maxOldPrice: 245 }
     ]
   },
   {
+    category: "alcohol",
     brand: "Nemiroff",
-    products: [
-      { type: "горілка класична", variants: ["0.5л", "0.7л"] },
-      { type: "горілка premium", variants: ["0.5л"] }
+    items: [
+      { name: "горілка класична 0.5л", minOldPrice: 180, maxOldPrice: 285 },
+      { name: "горілка premium 0.5л", minOldPrice: 220, maxOldPrice: 340 }
     ]
   },
   {
+    category: "alcohol",
     brand: "Хортиця",
-    products: [
-      { type: "горілка класична", variants: ["0.5л", "0.7л"] },
-      { type: "горілка premium", variants: ["0.5л"] }
+    items: [
+      { name: "горілка класична 0.5л", minOldPrice: 170, maxOldPrice: 275 },
+      { name: "горілка premium 0.5л", minOldPrice: 210, maxOldPrice: 330 }
     ]
   },
   {
+    category: "alcohol",
     brand: "Absolut",
-    products: [
-      { type: "горілка premium", variants: ["0.5л", "0.7л"] }
+    items: [
+      { name: "горілка premium 0.7л", minOldPrice: 520, maxOldPrice: 760 }
     ]
   },
   {
+    category: "alcohol",
     brand: "Jameson",
-    products: [
-      { type: "віскі", variants: ["0.5л", "0.7л"] }
+    items: [
+      { name: "віскі 0.7л", minOldPrice: 780, maxOldPrice: 1150 }
     ]
   },
   {
+    category: "alcohol",
     brand: "Jack Daniel's",
-    products: [
-      { type: "віскі", variants: ["0.5л", "0.7л"] }
+    items: [
+      { name: "віскі 0.7л", minOldPrice: 820, maxOldPrice: 1220 }
     ]
   }
 ];
-
-function pickByIndex(array, index) {
-  return array[index % array.length];
-}
 
 function normalizeSpaces(value) {
-  return String(value || "")
-    .replace(/\s+/g, " ")
-    .trim();
+  return String(value || "").replace(/\s+/g, " ").trim();
 }
 
-function buildProductTitle(brand, productType, variant) {
-  const safeBrand = normalizeSpaces(brand);
-  const safeType = normalizeSpaces(productType);
-  const safeVariant = normalizeSpaces(variant);
-
-  if (safeBrand && safeType && safeVariant) {
-    return `${safeBrand} ${safeType} ${safeVariant}`;
-  }
-
-  if (safeBrand && safeType) {
-    return `${safeBrand} ${safeType}`;
-  }
-
-  if (safeBrand && safeVariant) {
-    return `${safeBrand} товар ${safeVariant}`;
-  }
-
-  if (safeBrand) {
-    return `${safeBrand} товар`;
-  }
-
-  return "Товар";
+function buildProductTitle(brand, itemName) {
+  return normalizeSpaces(`${brand} ${itemName}`);
 }
 
-function calculatePrices(categoryKey, index, productType = "") {
-  const seed = index * 13;
-  let oldPrice;
+function seededNumber(seed, min, max) {
+  const value = Math.abs(Math.sin(seed)) * 10000;
+  const normalized = value - Math.floor(value);
+  return min + normalized * (max - min);
+}
 
-  switch (categoryKey) {
-    case "dairy":
-      oldPrice = 34 + (seed % 18);
-      break;
-    case "bread":
-      oldPrice = 20 + (seed % 16);
-      break;
-    case "chicken":
-      oldPrice = 109 + (seed % 70);
-      break;
-    case "ketchup":
-      oldPrice = 28 + (seed % 18);
-      break;
-    case "oil":
-      oldPrice = 55 + (seed % 25);
-      break;
-    case "chocolate":
-      oldPrice = 32 + (seed % 24);
-      break;
-    case "water":
-      oldPrice = 18 + (seed % 14);
-      break;
-    case "alcohol":
-      if (productType.includes("віскі")) {
-        oldPrice = 520 + (seed % 380);
-      } else if (productType.includes("горілка")) {
-        oldPrice = 160 + (seed % 220);
-      } else if (productType.includes("вино")) {
-        oldPrice = 140 + (seed % 180);
-      } else if (productType.includes("сидр") || productType.includes("слабоалкогольний")) {
-        oldPrice = 38 + (seed % 45);
-      } else {
-        oldPrice = 30 + (seed % 55);
-      }
-      break;
-    default:
-      oldPrice = 25 + (seed % 20);
-      break;
-  }
+function buildPrices(minOldPrice, maxOldPrice, seed) {
+  const oldPriceRaw = seededNumber(seed, minOldPrice, maxOldPrice);
+  const oldPrice = Math.round(oldPriceRaw * 100) / 100;
 
-  const discountPercent = 10 + (seed % 26);
-  const price = Number((oldPrice * (1 - discountPercent / 100)).toFixed(2));
+  const discountPercent = 10 + Math.floor(seededNumber(seed + 17, 0, 26));
+  const price = Math.round((oldPrice * (1 - discountPercent / 100)) * 100) / 100;
 
   return {
-    oldPrice: Number(oldPrice.toFixed(2)),
+    oldPrice,
     price,
     discountPercent
   };
 }
 
-function buildRegularPromotions(startId = 1) {
+function buildAtbPromotions() {
   const items = [];
-  let id = startId;
+  let id = 1;
 
-  categoryConfigs.forEach((category, categoryIndex) => {
-    category.brands.forEach((brand, brandIndex) => {
-      category.products.forEach((product, productIndex) => {
-        const variant = pickByIndex(
-          product.variants,
-          categoryIndex + brandIndex + productIndex
-        );
-
-        const title = buildProductTitle(brand, product.type, variant);
-        const { oldPrice, price, discountPercent } = calculatePrices(category.key, id, product.type);
-
-        items.push({
-          id: String(id),
-          storeId: 1,
-          category: category.key,
-          brand,
-          title,
-          price,
-          oldPrice,
-          discountPercent,
-          imageUrl: null
-        });
-
-        id++;
-      });
-    });
-  });
-
-  return { items, nextId: id };
-}
-
-function buildAlcoholPromotions(startId = 1) {
-  const items = [];
-  let id = startId;
-
-  alcoholCatalog.forEach((entry, brandIndex) => {
-    entry.products.forEach((product, productIndex) => {
-      const variant = pickByIndex(product.variants, brandIndex + productIndex);
-      const title = buildProductTitle(entry.brand, product.type, variant);
-      const { oldPrice, price, discountPercent } = calculatePrices("alcohol", id, product.type);
+  catalog.forEach((entry, entryIndex) => {
+    entry.items.forEach((item, itemIndex) => {
+      const seed = id * 31 + entryIndex * 17 + itemIndex * 13;
+      const { oldPrice, price, discountPercent } = buildPrices(
+        item.minOldPrice,
+        item.maxOldPrice,
+        seed
+      );
 
       items.push({
         id: String(id),
         storeId: 1,
-        category: "alcohol",
+        category: entry.category,
         brand: entry.brand,
-        title,
+        title: buildProductTitle(entry.brand, item.name),
         price,
         oldPrice,
         discountPercent,
@@ -321,14 +335,7 @@ function buildAlcoholPromotions(startId = 1) {
     });
   });
 
-  return { items, nextId: id };
-}
-
-function buildAtbPromotions() {
-  const regular = buildRegularPromotions(1);
-  const alcohol = buildAlcoholPromotions(regular.nextId);
-
-  return [...regular.items, ...alcohol.items];
+  return items;
 }
 
 app.get("/promotions/atb", (req, res) => {
