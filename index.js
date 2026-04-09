@@ -38,6 +38,25 @@ async function autoScroll(page) {
   });
 }
 
+async function accept18PlusIfNeeded(page) {
+  const buttons = await page.$$("button, a, div[role='button']");
+
+  for (const button of buttons) {
+    try {
+      const text = await page.evaluate(
+        (el) => (el.innerText || el.textContent || "").trim(),
+        button
+      );
+
+      if (/Так мені вже є 18/i.test(text)) {
+        await button.click({ delay: 50 });
+        await sleep(1000);
+        break;
+      }
+    } catch (_) {}
+  }
+}
+
 async function scrapeATB() {
   console.log("🚀 START SCRAPING ATB");
 
@@ -63,6 +82,7 @@ async function scrapeATB() {
     });
 
     await sleep(3000);
+    await accept18PlusIfNeeded(page);
     await autoScroll(page);
     await sleep(2000);
 
@@ -73,39 +93,74 @@ async function scrapeATB() {
           .trim();
       }
 
-      const cards = document.querySelectorAll("[class*='product']");
+      function getImage(card) {
+        const img = card.querySelector("img");
+        if (!img) return "";
+
+        return (
+          img.currentSrc ||
+          img.src ||
+          img.getAttribute("data-src") ||
+          img.getAttribute("data-lazy-src") ||
+          ""
+        );
+      }
+
+      function findCard(el) {
+        let current = el;
+
+        while (current) {
+          const text = txt(current);
+
+          if (
+            /(\d+[.,]\d{2})\s*грн\/шт\s*(\d+[.,]\d{2})/i.test(text) ||
+            /-\d+%/.test(text)
+          ) {
+            return current;
+          }
+
+          current = current.parentElement;
+        }
+
+        return el.parentElement || el;
+      }
+
+      const links = [...document.querySelectorAll("a[href*='/product/']")];
+      const seen = new Set();
       const result = [];
 
-      cards.forEach((card) => {
+      for (const link of links) {
+        const href = link.href || link.getAttribute("href") || "";
+        const title = txt(link);
+
+        if (!href || !title) continue;
+
+        const uniq = `${href}__${title}`;
+        if (seen.has(uniq)) continue;
+        seen.add(uniq);
+
+        const card = findCard(link);
         const text = txt(card);
-        const title =
-          txt(card.querySelector("a")) ||
-          txt(card.querySelector("[class*='title']")) ||
-          txt(card.querySelector("h2")) ||
-          txt(card.querySelector("h3"));
 
-        const prices = text.match(/(\d+[.,]\d{2})/g) || [];
-        if (!title || prices.length < 2) return;
+        const priceMatch = text.match(
+          /(\d+[.,]\d{2})\s*грн\/шт\s*(\d+[.,]\d{2})/i
+        );
 
-        const img = card.querySelector("img");
+        if (!priceMatch) continue;
 
         result.push({
           title,
           rawText: text,
-          priceText: prices[0],
-          oldPriceText: prices[1],
-          imageUrl:
-            img?.currentSrc ||
-            img?.src ||
-            img?.getAttribute?.("data-src") ||
-            ""
+          priceText: priceMatch[1],
+          oldPriceText: priceMatch[2],
+          imageUrl: getImage(card)
         });
-      });
+      }
 
       return result;
     });
 
-    console.log("🔍 PRODUCT CARDS FOUND:", rawItems.length);
+    console.log("🔍 PRODUCT LINKS FOUND:", rawItems.length);
     console.log("🧪 SAMPLE:", rawItems.slice(0, 3));
 
     const items = rawItems
@@ -113,8 +168,13 @@ async function scrapeATB() {
         const price = parsePrice(item.priceText);
         const oldPrice = parsePrice(item.oldPriceText);
 
-        if (!item.title || !price || !oldPrice) return null;
-        if (!(oldPrice > price)) return null;
+        if (!item.title || !Number.isFinite(price) || !Number.isFinite(oldPrice)) {
+          return null;
+        }
+
+        if (!(oldPrice > price)) {
+          return null;
+        }
 
         return {
           id: String(i + 1),
