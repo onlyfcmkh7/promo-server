@@ -1,7 +1,9 @@
 const express = require("express");
 
 const app = express();
-const PORT = 3000;
+
+// ❗ ВАЖЛИВО
+const PORT = process.env.PORT || 3000;
 
 app.get("/promotions/atb", (req, res) => {
   res.json([
@@ -24,7 +26,6 @@ app.get("/promotions/atb", (req, res) => {
   ]);
 });
 
-// 🔥 ГОЛОВНЕ ВИПРАВЛЕННЯ ТУТ
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`Server running on http://localhost:${PORT}`);
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
 });
