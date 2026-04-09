@@ -78,14 +78,50 @@ const categoryConfigs = [
   },
   {
     key: "alcohol",
-    brands: ["Оболонь", "Чернігівське", "Львівське", "Stella Artois", "Garage", "Revo"],
+    brands: [
+      "Оболонь",
+      "Чернігівське",
+      "Львівське",
+      "Stella Artois",
+      "Corona Extra",
+      "Garage",
+      "Revo",
+      "Shabo",
+      "Koblevo",
+      "Nemiroff",
+      "Хортиця",
+      "Absolut",
+      "Jameson",
+      "Jack Daniel's"
+    ],
     products: [
       { type: "пиво світле", variants: ["0.5л", "1л"] },
-      { type: "пиво темне", variants: ["0.5л"] },
       { type: "пиво нефільтроване", variants: ["0.5л"] },
-      { type: "сидр", variants: ["0.5л"] },
-      { type: "напій слабоалкогольний", variants: ["0.5л"] }
-    ]
+      { type: "пиво lager", variants: ["0.5л"] },
+      { type: "сидр", variants: ["0.4л", "0.5л"] },
+      { type: "напій слабоалкогольний", variants: ["0.33л", "0.5л"] },
+      { type: "вино біле сухе", variants: ["0.75л"] },
+      { type: "вино червоне напівсолодке", variants: ["0.75л"] },
+      { type: "горілка класична", variants: ["0.5л", "0.7л"] },
+      { type: "горілка premium", variants: ["0.5л"] },
+      { type: "віскі", variants: ["0.5л", "0.7л"] }
+    ],
+    brandProductMap: {
+      "Оболонь": ["пиво світле", "пиво нефільтроване"],
+      "Чернігівське": ["пиво світле", "пиво lager"],
+      "Львівське": ["пиво світле", "пиво нефільтроване"],
+      "Stella Artois": ["пиво lager"],
+      "Corona Extra": ["пиво світле"],
+      "Garage": ["сидр"],
+      "Revo": ["напій слабоалкогольний"],
+      "Shabo": ["вино біле сухе", "вино червоне напівсолодке"],
+      "Koblevo": ["вино біле сухе", "вино червоне напівсолодке"],
+      "Nemiroff": ["горілка класична", "горілка premium"],
+      "Хортиця": ["горілка класична", "горілка premium"],
+      "Absolut": ["горілка premium"],
+      "Jameson": ["віскі"],
+      "Jack Daniel's": ["віскі"]
+    }
   }
 ];
 
@@ -150,7 +186,7 @@ function calculatePrices(categoryKey, index) {
       oldPrice = 18 + (seed % 14);
       break;
     case "alcohol":
-      oldPrice = 28 + (seed % 40);
+      oldPrice = 35 + (seed % 320);
       break;
     default:
       oldPrice = 25 + (seed % 20);
@@ -173,7 +209,15 @@ function buildAtbPromotions() {
 
   categoryConfigs.forEach((category, categoryIndex) => {
     category.brands.forEach((brand, brandIndex) => {
-      category.products.forEach((product, productIndex) => {
+      let allowedProducts = category.products;
+
+      if (category.brandProductMap && category.brandProductMap[brand]) {
+        allowedProducts = category.products.filter(product =>
+          category.brandProductMap[brand].includes(product.type)
+        );
+      }
+
+      allowedProducts.forEach((product, productIndex) => {
         const variant = pickByIndex(
           product.variants,
           categoryIndex + brandIndex + productIndex
