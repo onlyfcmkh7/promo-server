@@ -6,22 +6,22 @@ const app = express();
 app.use(cors());
 
 const PORT = process.env.PORT || 3000;
-
 const ATB_URL = "https://www.atbmarket.com/promo/sale_tovari";
 
 function sleep(ms) {
-  return new Promise(r => setTimeout(r, ms));
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function parsePrice(value) {
   if (!value) return null;
-  const cleaned = value.replace(",", ".").replace(/[^\d.]/g, "");
-  return Number(cleaned);
+  const cleaned = String(value).replace(",", ".").replace(/[^\d.]/g, "");
+  const num = Number(cleaned);
+  return Number.isFinite(num) ? num : null;
 }
 
 async function autoScroll(page) {
   await page.evaluate(async () => {
-    await new Promise(resolve => {
+    await new Promise((resolve) => {
       let total = 0;
       const distance = 500;
 
@@ -43,100 +43,116 @@ async function scrapeATB() {
 
   const browser = await puppeteer.launch({
     headless: "new",
-    args: ["--no-sandbox", "--disable-setuid-sandbox"]
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage"
+    ]
   });
 
-  const page = await browser.newPage();
+  try {
+    const page = await browser.newPage();
 
-  await page.goto(ATB_URL, {
-    waitUntil: "networkidle2",
-    timeout: 60000
-  });
+    await page.setUserAgent(
+      "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    );
 
-  await sleep(3000);
-  await autoScroll(page);
-  await sleep(2000);
-
-  const items = await page.evaluate(() => {
-    function text(el) {
-      return (el?.innerText || "").replace(/\s+/g, " ").trim();
-    }
-
-    const links = document.querySelectorAll("a[href*='/product/']");
-    console.log("LINKS LENGTH:", links.length);
-
-    const result = [];
-
-    links.forEach(link => {
-      const card = link.closest("div");
-      if (!card) return;
-
-      const cardText = text(card);
-
-      const priceMatch = cardText.match(
-        /(\d+[.,]\d{2})\s*грн\/шт\s*(\d+[.,]\d{2})/i
-      );
-
-      if (!priceMatch) return;
-
-      const img = card.querySelector("img");
-
-      result.push({
-        title: text(link),
-        rawText: cardText,
-        price: priceMatch[1],
-        oldPrice: priceMatch[2],
-        image: img?.src || ""
-      });
+    await page.goto(ATB_URL, {
+      waitUntil: "networkidle2",
+      timeout: 60000
     });
 
-    return {
-      count: links.length,
-      items: result.slice(0, 50) // щоб не було занадто велико
-    };
-  });
+    await sleep(3000);
+    await autoScroll(page);
+    await sleep(2000);
 
-  console.log("🔍 LINKS FOUND:", items.count);
-  console.log("✅ VALID ITEMS:", items.items.length);
+    const rawItems = await page.evaluate(() => {
+      function txt(el) {
+        return (el?.innerText || el?.textContent || "")
+          .replace(/\s+/g, " ")
+          .trim();
+      }
 
-  if (!items.items.length) {
-    console.log("❌ NO ITEMS FOUND");
+      const cards = document.querySelectorAll("[class*='product']");
+      const result = [];
+
+      cards.forEach((card) => {
+        const text = txt(card);
+        const title =
+          txt(card.querySelector("a")) ||
+          txt(card.querySelector("[class*='title']")) ||
+          txt(card.querySelector("h2")) ||
+          txt(card.querySelector("h3"));
+
+        const prices = text.match(/(\d+[.,]\d{2})/g) || [];
+        if (!title || prices.length < 2) return;
+
+        const img = card.querySelector("img");
+
+        result.push({
+          title,
+          rawText: text,
+          priceText: prices[0],
+          oldPriceText: prices[1],
+          imageUrl:
+            img?.currentSrc ||
+            img?.src ||
+            img?.getAttribute?.("data-src") ||
+            ""
+        });
+      });
+
+      return result;
+    });
+
+    console.log("🔍 PRODUCT CARDS FOUND:", rawItems.length);
+    console.log("🧪 SAMPLE:", rawItems.slice(0, 3));
+
+    const items = rawItems
+      .map((item, i) => {
+        const price = parsePrice(item.priceText);
+        const oldPrice = parsePrice(item.oldPriceText);
+
+        if (!item.title || !price || !oldPrice) return null;
+        if (!(oldPrice > price)) return null;
+
+        return {
+          id: String(i + 1),
+          storeId: 1,
+          category: "other",
+          brand: item.title.split(" ")[0] || "",
+          title: item.title,
+          price,
+          oldPrice,
+          discountPercent: Math.round(((oldPrice - price) / oldPrice) * 100),
+          createdAt: Date.now(),
+          imageUrl: item.imageUrl || ""
+        };
+      })
+      .filter(Boolean);
+
+    console.log("✅ VALID ITEMS:", items.length);
+
+    if (!items.length) {
+      console.log("❌ NO ITEMS FOUND");
+    }
+
+    return items;
+  } finally {
     await browser.close();
-    return [];
   }
-
-  const result = items.items.map((item, i) => {
-    const price = parsePrice(item.price);
-    const oldPrice = parsePrice(item.oldPrice);
-
-    return {
-      id: String(i + 1),
-      storeId: 1,
-      category: "other",
-      brand: item.title.split(" ")[0],
-      title: item.title,
-      price,
-      oldPrice,
-      discountPercent: Math.round(((oldPrice - price) / oldPrice) * 100),
-      createdAt: Date.now(),
-      imageUrl: item.image
-    };
-  });
-
-  await browser.close();
-
-  console.log("🎉 FINAL ITEMS:", result.length);
-
-  return result;
 }
 
-app.get("/promotions/atb", async (req, res) => {
+app.get("/promotions/atb", async (_req, res) => {
   try {
     const data = await scrapeATB();
     res.json(data);
   } catch (e) {
     console.error("🔥 ERROR:", e);
-    res.status(500).json({ error: e.message });
+    res.status(500).json({
+      error: "fail",
+      details: e.message
+    });
   }
 });
 
