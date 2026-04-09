@@ -11,18 +11,18 @@ const PORT = process.env.PORT || 3000;
 
 /**
  * Офіційні сторінки АТБ з акційними товарами.
- * /promo/sale_tovari  -> "Акційні пропозиції"
- * /catalog/economy    -> "Акція Економія"
- * /catalog/388-aktsiya-7-dniv -> "Акція 7 днів"
  */
 const ATB_PROMO_URLS = [
   "https://www.atbmarket.com/promo/sale_tovari",
   "https://www.atbmarket.com/catalog/economy",
   "https://www.atbmarket.com/catalog/388-aktsiya-7-dniv",
+  "https://www.atbmarket.com/catalog/aktsiya",
+  "https://www.atbmarket.com/catalog/novynky",
 ];
 
 const STORE_ID = 1;
 const CACHE_TTL_MS = 10 * 60 * 1000; // 10 хв
+
 let cache = {
   at: 0,
   data: [],
@@ -41,7 +41,9 @@ function normalizeWhitespace(value) {
 
 function parsePrice(value) {
   if (!value) return null;
-  const normalized = String(value).replace(",", ".").replace(/[^\d.]/g, "");
+  const normalized = String(value)
+    .replace(",", ".")
+    .replace(/[^\d.]/g, "");
   const parsed = Number(normalized);
   return Number.isFinite(parsed) ? parsed : null;
 }
@@ -53,7 +55,12 @@ function clampPercent(n) {
 }
 
 function computeDiscountPercent(price, oldPrice, fallback) {
-  if (Number.isFinite(price) && Number.isFinite(oldPrice) && oldPrice > price && oldPrice > 0) {
+  if (
+    Number.isFinite(price) &&
+    Number.isFinite(oldPrice) &&
+    oldPrice > price &&
+    oldPrice > 0
+  ) {
     return Math.round(((oldPrice - price) / oldPrice) * 100);
   }
   return clampPercent(fallback);
@@ -61,6 +68,7 @@ function computeDiscountPercent(price, oldPrice, fallback) {
 
 function parseDdMm(ddmm) {
   if (!ddmm) return null;
+
   const match = ddmm.match(/^(\d{1,2})\.(\d{1,2})$/);
   if (!match) return null;
 
@@ -72,7 +80,6 @@ function parseDdMm(ddmm) {
   const d = new Date(year, month, day, 12, 0, 0, 0);
   if (Number.isNaN(d.getTime())) return null;
 
-  // Підстраховка на перехід року (грудень/січень)
   const diffDays = Math.round((d.getTime() - now.getTime()) / 86400000);
   if (diffDays < -330) {
     d.setFullYear(year + 1);
@@ -85,9 +92,16 @@ function parseDdMm(ddmm) {
 
 function isWithinNext7Days(date) {
   if (!(date instanceof Date) || Number.isNaN(date.getTime())) return false;
+
   const now = new Date();
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const startOfToday = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate()
+  ).getTime();
+
   const endLimit = startOfToday + 7 * 24 * 60 * 60 * 1000;
+
   return date.getTime() >= startOfToday && date.getTime() <= endLimit;
 }
 
@@ -126,7 +140,6 @@ function extractBrand(title) {
   const original = normalizeWhitespace(title);
   if (!original) return "Unknown";
 
-  // Спочатку спробуємо знайти відомі 2-3-слівні бренди
   const multiWordCandidates = [
     "Своя Лінія",
     "Розумний Вибір",
@@ -137,11 +150,12 @@ function extractBrand(title) {
   for (const candidate of multiWordCandidates) {
     const re = new RegExp(candidate, "i");
     if (re.test(original)) {
-      return candidate.replace("Вибір", "вибір").replace("Лінія", "Лінія");
+      return candidate
+        .replace("Вибір", "вибір")
+        .replace("Лінія", "Лінія");
     }
   }
 
-  // Витягаємо слова-кандидати з великої літери
   const genericWords = new Set([
     "Морська", "Капуста", "Напій", "Бренді", "Консерви", "Чай", "Добавка",
     "Кава", "Крем", "Пельмені", "Чипси", "Кульки", "Батончик", "Набір",
@@ -163,7 +177,6 @@ function extractBrand(title) {
     return filtered[0];
   }
 
-  // fallback: перше слово після ваги/об'єму
   const afterUnits = original
     .replace(/\b\d+[.,]?\d*\s?(кг|г|л|мл|шт|таб|капс|уп|пак|пет)\b/gi, " ")
     .replace(/\s+/g, " ")
@@ -178,6 +191,7 @@ async function autoScroll(page) {
     await new Promise((resolve) => {
       let total = 0;
       const distance = 800;
+
       const timer = setInterval(() => {
         const maxScroll = document.body.scrollHeight;
         window.scrollBy(0, distance);
@@ -194,9 +208,14 @@ async function autoScroll(page) {
 
 async function accept18PlusIfNeeded(page) {
   const buttons = await page.$$("button, a, div[role='button']");
+
   for (const button of buttons) {
     try {
-      const text = await page.evaluate((el) => (el.innerText || el.textContent || "").trim(), button);
+      const text = await page.evaluate(
+        (el) => (el.innerText || el.textContent || "").trim(),
+        button
+      );
+
       if (/Так мені вже є 18/i.test(text)) {
         await button.click({ delay: 50 });
         await sleep(800);
@@ -233,19 +252,23 @@ async function extractPromoItemsFromPage(page, sourceUrl) {
 
     function findCard(el) {
       let current = el;
+
       while (current) {
         const t = text(current);
-        const hasPrice = /\d+[.,]\d{2}\s*грн\/шт/i.test(t);
+        const hasPrice = /\d+[.,]\d{2}/i.test(t);
         const hasDiscount = /-\d+%/.test(t);
+
         if (hasPrice || hasDiscount) return current;
         current = current.parentElement;
       }
+
       return el.parentElement || el;
     }
 
     function getImage(card) {
       const img = card.querySelector("img");
       if (!img) return "";
+
       return (
         img.currentSrc ||
         attr(img, "src") ||
@@ -272,19 +295,22 @@ async function extractPromoItemsFromPage(page, sourceUrl) {
       const card = findCard(link);
       const cardText = text(card);
 
-      const priceMatch = cardText.match(/(\d+[.,]\d{2})\s*грн\/шт\s*(\d+[.,]\d{2})/i);
+      const prices = [...cardText.matchAll(/(\d+[.,]\d{2})/g)].map((m) => m[1]);
       const discountMatch = cardText.match(/-(\d+)%/);
       const endDateMatch = cardText.match(/до\s*(\d{2}\.\d{2})/i);
 
-      if (!priceMatch && !discountMatch) continue;
+      const priceText = prices[0] || null;
+      const oldPriceText = prices[1] || null;
+
+      if (!priceText) continue;
 
       result.push({
         href,
         title,
         cardText,
         imageUrl: getImage(card),
-        priceText: priceMatch ? priceMatch[1] : null,
-        oldPriceText: priceMatch ? priceMatch[2] : null,
+        priceText,
+        oldPriceText,
         discountText: discountMatch ? discountMatch[1] : null,
         endDateText: endDateMatch ? endDateMatch[1] : null,
       });
@@ -303,11 +329,13 @@ function normalizeAtbItems(rawItems) {
     const title = normalizeWhitespace(raw.title);
     const price = parsePrice(raw.priceText);
     const oldPrice = parsePrice(raw.oldPriceText);
-    const discountPercent = computeDiscountPercent(price, oldPrice, raw.discountText);
 
     if (!title) continue;
-    if (!Number.isFinite(price) || !Number.isFinite(oldPrice)) continue;
-    if (!(oldPrice > price)) continue;
+    if (!Number.isFinite(price)) continue;
+
+    const safeOldPrice = Number.isFinite(oldPrice) ? oldPrice : price;
+    const discountPercent =
+      computeDiscountPercent(price, safeOldPrice, raw.discountText) || 0;
 
     const endDate = parseDdMm(raw.endDateText);
     if (raw.endDateText && !isWithinNext7Days(endDate)) {
@@ -321,7 +349,7 @@ function normalizeAtbItems(rawItems) {
       brand: extractBrand(title),
       title,
       price,
-      oldPrice,
+      oldPrice: safeOldPrice,
       discountPercent,
       createdAt: inferCreatedAt(endDate),
       imageUrl: raw.imageUrl || "",
@@ -330,8 +358,8 @@ function normalizeAtbItems(rawItems) {
     });
   }
 
-  // dedupe by sourceUrl/title
   const map = new Map();
+
   for (const item of normalized) {
     const key = `${item.sourceUrl}__${item.title}`;
     if (!map.has(key)) {
@@ -437,7 +465,6 @@ app.get("/promotions/atb", async (_req, res) => {
   } catch (error) {
     console.error("GET /promotions/atb error:", error);
 
-    // ВАЖЛИВО: не повертаємо фейкові товари
     return res.status(502).json({
       error: "Failed to fetch real ATB promotions",
       details: error.message,
