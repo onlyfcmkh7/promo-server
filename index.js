@@ -22,48 +22,51 @@ function parsePrice(value) {
 function detectCategory(title) {
   const t = (title || "").toLowerCase();
 
-  if (/(молоко|кефір|йогурт|сметан|сир\b|сирок|масло|вершки|ряжанка|моцарел)/.test(t)) {
-    return "dairy";
-  }
+  if (/\bморська капуста\b/.test(t)) return "groceries";
 
-  if (/(ковбас|сосиск|сардель|курка|курятина|індич|свинина|ялович|м'яс|фарш|бекон|шинка|паштет|курица)/.test(t)) {
-    return "meat";
-  }
-
-  if (/(риба|лосось|оселед|тунець|скумбр|сардин|морепродукт|морська капуста)/.test(t)) {
-    return "fish";
-  }
-
-  if (/(хліб|батон|лаваш|булоч|круасан|тісто|пиріг|печиво|вафл|пряник|торт)/.test(t)) {
-    return "bakery";
-  }
-
-  if (/(вода|сік|нектар|напій|лимонад|квас|чай|кава|какао|енергетич|кола)/.test(t)) {
-    return "drinks";
-  }
-
-  if (/(пиво|вино|горілка|бренді|коньяк|віскі|ром|джин|лікер|вермут|lambrusco)/.test(t)) {
-    return "alcohol";
-  }
-
-  if (/(чипси|снеки|горішк|попкорн|насіння|крекер|кукурудзян)/.test(t)) {
-    return "snacks";
-  }
-
-  if (/(цукерк|шоколад|десерт|зефір|мармелад|драже|батончик)/.test(t)) {
-    return "sweets";
-  }
-
-  if (/(gerber|galicia baby|дитяч|пюре|суміш)/.test(t)) {
+  if (/\b(gerber|galicia baby|дитяч|пюре|суміш|пластир)\b/.test(t)) {
     return "baby";
   }
 
-  if (/(порошок|миюч|засіб|серветки|рушники|туалетний папір|дезодорант|шампунь|крем|мило|пластир)/.test(t)) {
+  if (/\b(порошок|шампунь|мило|крем|серветки|туалетний папір|рушники|миюч|засіб|дезодорант)\b/.test(t)) {
     return "household";
   }
 
-  if (/(консерви|крупи|макарон|майонез|соус|кетчуп|олія|оцет|приправ|булгур|рис|греч|борошно|цукор|сіль|суп|картопляне пюре)/.test(t)) {
+  if (/\b(кава|чай|сік|нектар|напій|вода|лимонад|квас|кола|енергетич)\b/.test(t)) {
+    return "drinks";
+  }
+
+  if (/\b(молоко|кефір|йогурт|сметан|вершки|сир|сирок|моцарел|масло|ряжанка)\b/.test(t)) {
+    return "dairy";
+  }
+
+  if (/\b(ковбас|сосиск|сардель|бекон|шинка|м'яс|мяс|фарш|курка|курятина|індич|свинина|ялович|філе)\b/.test(t)) {
+    return "meat";
+  }
+
+  if (/\b(риба|лосось|оселед|тунець|скумбр|сардин|морепродукт)\b/.test(t)) {
+    return "fish";
+  }
+
+  if (/\b(хліб|батон|лаваш|булоч|круасан|тісто|пиріг|печиво|вафл|пряник|торт)\b/.test(t)) {
+    return "bakery";
+  }
+
+  if (/\b(чипси|снеки|горішк|попкорн|насіння|крекер|кукурудзян)\b/.test(t)) {
+    return "snacks";
+  }
+
+  if (/\b(цукерк|шоколад|десерт|зефір|мармелад|драже|батончик)\b/.test(t)) {
+    return "sweets";
+  }
+
+  if (/\b(консерви|крупи|макарон|майонез|соус|кетчуп|олія|оцет|приправа|булгур|рис|греч|борошно|цукор|сіль|суп)\b/.test(t)) {
     return "groceries";
+  }
+
+  // ВАЖЛИВО: алкоголь В КІНЦІ
+  if (/\b(бренді|коньяк|віскі|ром|джин|горілка|вино|пиво|вермут|лікер|ігристе)\b/.test(t)) {
+    return "alcohol";
   }
 
   return "other";
@@ -72,7 +75,6 @@ function detectCategory(title) {
 function detectBrand(title) {
   const brands = [
     "Своя Лінія",
-    "Своя лінія",
     "Розумний вибір",
     "Gerber",
     "Galicia BABY",
@@ -86,11 +88,7 @@ function detectBrand(title) {
     "Живчик",
     "Kaheturi",
     "Eilles",
-    "Livity",
-    "VALE",
-    "Lambrusco Dell'Emilia",
-    "Giacobazzi",
-    "Коблево"
+    "Livity"
   ];
 
   const safeTitle = title || "";
@@ -198,8 +196,7 @@ async function scrapeATB() {
           const text = txt(current);
 
           if (
-            /(\d+[.,]\d{2})\s*грн\/шт\s*(\d+[.,]\d{2})/i.test(text) ||
-            /-\d+%/.test(text)
+            /(\d+[.,]\d{2})\s*грн\/шт\s*(\d+[.,]\d{2})/i.test(text)
           ) {
             return current;
           }
@@ -215,14 +212,12 @@ async function scrapeATB() {
       const result = [];
 
       for (const link of links) {
-        const href = link.href || link.getAttribute("href") || "";
         const title = txt(link);
+        if (!title) continue;
 
-        if (!href || !title) continue;
-
-        const uniq = `${href}__${title}`;
-        if (seen.has(uniq)) continue;
-        seen.add(uniq);
+        const key = title;
+        if (seen.has(key)) continue;
+        seen.add(key);
 
         const card = findCard(link);
         const text = txt(card);
@@ -235,7 +230,6 @@ async function scrapeATB() {
 
         result.push({
           title,
-          rawText: text,
           priceText: priceMatch[1],
           oldPriceText: priceMatch[2],
           imageUrl: getImage(card)
@@ -245,21 +239,14 @@ async function scrapeATB() {
       return result;
     });
 
-    console.log("🔍 PRODUCT LINKS FOUND:", rawItems.length);
-    console.log("🧪 SAMPLE:", rawItems.slice(0, 3));
+    console.log("🔍 FOUND:", rawItems.length);
 
     const items = rawItems
       .map((item, i) => {
         const price = parsePrice(item.priceText);
         const oldPrice = parsePrice(item.oldPriceText);
 
-        if (!item.title || !Number.isFinite(price) || !Number.isFinite(oldPrice)) {
-          return null;
-        }
-
-        if (!(oldPrice > price)) {
-          return null;
-        }
+        if (!price || !oldPrice || !(oldPrice > price)) return null;
 
         return {
           id: String(i + 1),
@@ -271,16 +258,12 @@ async function scrapeATB() {
           oldPrice,
           discountPercent: Math.round(((oldPrice - price) / oldPrice) * 100),
           createdAt: Date.now(),
-          imageUrl: item.imageUrl || ""
+          imageUrl: item.imageUrl
         };
       })
       .filter(Boolean);
 
-    console.log("✅ VALID ITEMS:", items.length);
-
-    if (!items.length) {
-      console.log("❌ NO ITEMS FOUND");
-    }
+    console.log("✅ FINAL:", items.length);
 
     return items;
   } finally {
@@ -293,11 +276,8 @@ app.get("/promotions/atb", async (_req, res) => {
     const data = await scrapeATB();
     res.json(data);
   } catch (e) {
-    console.error("🔥 ERROR:", e);
-    res.status(500).json({
-      error: "fail",
-      details: e.message
-    });
+    console.error(e);
+    res.status(500).json({ error: "fail" });
   }
 });
 
