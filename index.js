@@ -1,291 +1,451 @@
+/* server.js */
 const express = require("express");
-const cheerio = require("cheerio");
+const cors = require("cors");
+const puppeteer = require("puppeteer");
 
 const app = express();
+app.use(cors());
+app.use(express.json());
+
 const PORT = process.env.PORT || 3000;
 
-const PROMO_URLS = [
-  "https://www.atbmarket.com/promo/all?filter=0",
-  "https://www.atbmarket.com/promo/sim_dniv",
-  "https://promo.atbmarket.com/"
+/**
+ * Офіційні сторінки АТБ з акційними товарами.
+ * /promo/sale_tovari  -> "Акційні пропозиції"
+ * /catalog/economy    -> "Акція Економія"
+ * /catalog/388-aktsiya-7-dniv -> "Акція 7 днів"
+ */
+const ATB_PROMO_URLS = [
+  "https://www.atbmarket.com/promo/sale_tovari",
+  "https://www.atbmarket.com/catalog/economy",
+  "https://www.atbmarket.com/catalog/388-aktsiya-7-dniv",
 ];
 
-const DEFAULT_HEADERS = {
-  "User-Agent":
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
-  "Accept":
-    "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-  "Accept-Language": "uk-UA,uk;q=0.9,en-US;q=0.8,en;q=0.7",
-  "Cache-Control": "no-cache",
-  "Pragma": "no-cache",
-  "Referer": "https://www.atbmarket.com/"
-};
-
+const STORE_ID = 1;
+const CACHE_TTL_MS = 10 * 60 * 1000; // 10 хв
 let cache = {
-  updatedAt: 0,
-  items: []
+  at: 0,
+  data: [],
 };
 
-function normalizeSpaces(value) {
-  return String(value || "").replace(/\s+/g, " ").trim();
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function normalizeWhitespace(value) {
+  return (value || "")
+    .replace(/\u00A0/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function parsePrice(value) {
   if (!value) return null;
-
-  const cleaned = String(value)
-    .replace(/\u00A0/g, " ")
-    .replace(/\s+/g, "")
-    .replace(",", ".")
-    .match(/\d+(?:\.\d+)?/);
-
-  if (!cleaned) return null;
-
-  const parsed = Number(cleaned[0]);
+  const normalized = String(value).replace(",", ".").replace(/[^\d.]/g, "");
+  const parsed = Number(normalized);
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function clampPercent(n) {
+  const x = Number(n);
+  if (!Number.isFinite(x)) return null;
+  return Math.max(0, Math.min(100, Math.round(x)));
+}
+
+function computeDiscountPercent(price, oldPrice, fallback) {
+  if (Number.isFinite(price) && Number.isFinite(oldPrice) && oldPrice > price && oldPrice > 0) {
+    return Math.round(((oldPrice - price) / oldPrice) * 100);
+  }
+  return clampPercent(fallback);
+}
+
+function parseDdMm(ddmm) {
+  if (!ddmm) return null;
+  const match = ddmm.match(/^(\d{1,2})\.(\d{1,2})$/);
+  if (!match) return null;
+
+  const now = new Date();
+  const year = now.getFullYear();
+  const day = Number(match[1]);
+  const month = Number(match[2]) - 1;
+
+  const d = new Date(year, month, day, 12, 0, 0, 0);
+  if (Number.isNaN(d.getTime())) return null;
+
+  // Підстраховка на перехід року (грудень/січень)
+  const diffDays = Math.round((d.getTime() - now.getTime()) / 86400000);
+  if (diffDays < -330) {
+    d.setFullYear(year + 1);
+  } else if (diffDays > 330) {
+    d.setFullYear(year - 1);
+  }
+
+  return d;
+}
+
+function isWithinNext7Days(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return false;
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const endLimit = startOfToday + 7 * 24 * 60 * 60 * 1000;
+  return date.getTime() >= startOfToday && date.getTime() <= endLimit;
+}
+
+function inferCreatedAt(endDate) {
+  if (endDate instanceof Date && !Number.isNaN(endDate.getTime())) {
+    return endDate.getTime() - 7 * 24 * 60 * 60 * 1000;
+  }
+  return Date.now();
+}
+
 function detectCategory(title) {
-  const text = normalizeSpaces(title).toLowerCase();
+  const t = (title || "").toLowerCase();
 
-  if (
-    text.includes("молоко") ||
-    text.includes("кефір") ||
-    text.includes("сметана") ||
-    text.includes("ряжанка") ||
-    text.includes("йогурт") ||
-    text.includes("сир")
-  ) return "dairy";
+  const rules = [
+    ["dairy", /(молоко|кефір|йогурт|сметан|вершки|сир\b|сирки|сирок|масло|ряжанка|закваска|молоч)/],
+    ["meat", /(ковбас|сосиск|сардель|курка|курятина|індич|свинина|ялович|м'яс|фарш|бекон|шинка|паштет)/],
+    ["fish", /(риба|лосось|оселед|тунець|скумбр|сардин|морепродукт|крабов|капуста морська|морська капуста)/],
+    ["bakery", /(хліб|батон|лаваш|булоч|круасан|тісто|пиріг|печиво|вафл|пряник|сушка|сухар|торт|тістечк)/],
+    ["drinks", /(вода|сік|нектар|напій|лимонад|квас|чай|кава|какао|енергетич|кола|мінеральна)/],
+    ["alcohol", /(пиво|вино|горілка|бренді|коньяк|віскі|ром|джин|лікер|вермут|ігристе|слабоалкоголь)/],
+    ["snacks", /(чипси|снеки|горішк|сухофрукт|крекер|батончик|попкорн|кукурудзян|насіння)/],
+    ["sweets", /(цукерк|шоколад|десерт|зефір|мармелад|драже|паста шоколадно|печиво)/],
+    ["baby", /(gerber|дитяч|пюре|підгузк|суміш)/],
+    ["household", /(порошок|миюч|засіб|серветки|рушники|туалетний папір|пластир|ватні палички|дезодорант|шампунь|крем|мило)/],
+    ["groceries", /(консерви|крупи|макарон|майонез|соус|кетчуп|олія|оцет|приправ|булгур|рис|греч|борошно|цукор|сіль|чай)/],
+  ];
 
-  if (
-    text.includes("хліб") ||
-    text.includes("батон") ||
-    text.includes("лаваш") ||
-    text.includes("булоч")
-  ) return "bread";
-
-  if (
-    text.includes("кур") ||
-    text.includes("філе") ||
-    text.includes("гомілка") ||
-    text.includes("стегно") ||
-    text.includes("крило")
-  ) return "chicken";
-
-  if (text.includes("кетчуп") || text.includes("соус")) return "ketchup";
-  if (text.includes("олія")) return "oil";
-  if (text.includes("шоколад")) return "chocolate";
-  if (text.includes("вода")) return "water";
-
-  if (
-    text.includes("пиво") ||
-    text.includes("сидр") ||
-    text.includes("віскі") ||
-    text.includes("горілка") ||
-    text.includes("вино") ||
-    text.includes("слабоалког")
-  ) return "alcohol";
+  for (const [category, regex] of rules) {
+    if (regex.test(t)) return category;
+  }
 
   return "other";
 }
 
 function extractBrand(title) {
-  const text = normalizeSpaces(title);
-  if (!text) return null;
+  const original = normalizeWhitespace(title);
+  if (!original) return "Unknown";
 
-  const knownBrands = [
-    "Яготинське",
-    "Галичина",
-    "Простоквашино",
-    "Київхліб",
-    "Кулиничі",
-    "Хлібодар",
-    "Наша Ряба",
-    "Гаврилівські курчата",
-    "Чумак",
-    "Торчин",
-    "Олейна",
-    "Щедрий Дар",
-    "Корона",
-    "Roshen",
-    "Millennium",
-    "Моршинська",
-    "BonAqua",
-    "Карпатська Джерельна",
-    "Оболонь",
-    "Чернігівське",
-    "Львівське",
-    "Stella Artois",
-    "Corona Extra",
-    "Garage",
-    "Revo",
-    "Shabo",
-    "Koblevo",
-    "Nemiroff",
-    "Хортиця",
-    "Absolut",
-    "Jameson",
-    "Jack Daniel's"
+  // Спочатку спробуємо знайти відомі 2-3-слівні бренди
+  const multiWordCandidates = [
+    "Своя Лінія",
+    "Розумний Вибір",
+    "Revers Cosmetics",
+    "Black Royal Tea",
   ];
 
-  const found = knownBrands.find((brand) =>
-    text.toLowerCase().startsWith(brand.toLowerCase())
-  );
-
-  if (found) return found;
-
-  return text.split(" ").slice(0, 2).join(" ").trim();
-}
-
-function buildPromotion(id, title, price, oldPrice, imageUrl) {
-  const safeTitle = normalizeSpaces(title);
-  if (!safeTitle || price == null) return null;
-
-  return {
-    id: String(id),
-    storeId: 1,
-    category: detectCategory(safeTitle),
-    brand: extractBrand(safeTitle),
-    title: safeTitle,
-    price,
-    oldPrice,
-    discountPercent:
-      oldPrice && oldPrice > price
-        ? Math.round(((oldPrice - price) / oldPrice) * 100)
-        : null,
-    createdAt: Date.now(),
-    imageUrl: imageUrl || null
-  };
-}
-
-async function fetchHtml(url) {
-  const response = await fetch(url, { headers: DEFAULT_HEADERS });
-
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status} for ${url}`);
+  for (const candidate of multiWordCandidates) {
+    const re = new RegExp(candidate, "i");
+    if (re.test(original)) {
+      return candidate.replace("Вибір", "вибір").replace("Лінія", "Лінія");
+    }
   }
 
-  return await response.text();
+  // Витягаємо слова-кандидати з великої літери
+  const genericWords = new Set([
+    "Морська", "Капуста", "Напій", "Бренді", "Консерви", "Чай", "Добавка",
+    "Кава", "Крем", "Пельмені", "Чипси", "Кульки", "Батончик", "Набір",
+    "Пюре", "Порошок", "Горілка", "Вода", "Сік", "Молоко", "Йогурт",
+    "Сметана", "Сир", "Сирок", "Цукерки", "Шоколад", "Печиво",
+  ]);
+
+  const matches = [...original.matchAll(/\b[А-ЯІЇЄҐA-Z][A-Za-zА-Яа-яІіЇїЄєҐґ'’.-]+(?:\s+[А-ЯІЇЄҐA-Z][A-Za-zА-Яа-яІіЇїЄєҐґ'’.-]+){0,2}/g)]
+    .map((m) => normalizeWhitespace(m[0]))
+    .filter(Boolean);
+
+  const filtered = matches.filter((m) => {
+    const first = m.split(" ")[0];
+    return !genericWords.has(first);
+  });
+
+  if (filtered.length > 0) {
+    filtered.sort((a, b) => b.length - a.length);
+    return filtered[0];
+  }
+
+  // fallback: перше слово після ваги/об'єму
+  const afterUnits = original
+    .replace(/\b\d+[.,]?\d*\s?(кг|г|л|мл|шт|таб|капс|уп|пак|пет)\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const word = afterUnits.split(" ").find((w) => /^[A-ZА-ЯІЇЄҐ]/.test(w));
+  return word || "Unknown";
 }
 
-function extractPromotionsFromHtml(html) {
-  const $ = cheerio.load(html);
-  const results = [];
-  const seen = new Set();
+async function autoScroll(page) {
+  await page.evaluate(async () => {
+    await new Promise((resolve) => {
+      let total = 0;
+      const distance = 800;
+      const timer = setInterval(() => {
+        const maxScroll = document.body.scrollHeight;
+        window.scrollBy(0, distance);
+        total += distance;
 
-  const selectors = [
-    "[class*='promo']",
-    "[class*='product']",
-    "[class*='card']",
-    "[class*='item']",
-    "article",
-    ".swiper-slide",
-    "li"
-  ];
-
-  selectors.forEach((selector) => {
-    $(selector).each((_, el) => {
-      const root = $(el);
-
-      const title = normalizeSpaces(
-        root.find("h1,h2,h3,h4,[class*='title'],[class*='name']").first().text()
-      );
-
-      if (!title || title.length < 5) return;
-
-      const priceCandidates = [];
-
-      root.find("[class*='price'], [class*='old'], [class*='cost']").each((__, priceEl) => {
-        const value = parsePrice($(priceEl).text());
-        if (value != null) priceCandidates.push(value);
-      });
-
-      const textPriceMatches = normalizeSpaces(root.text()).match(/\d+[.,]?\d*/g) || [];
-      textPriceMatches.forEach((p) => {
-        const value = parsePrice(p);
-        if (value != null) priceCandidates.push(value);
-      });
-
-      const uniquePrices = [...new Set(priceCandidates)].filter((v) => v > 0 && v < 5000);
-
-      if (uniquePrices.length === 0) return;
-
-      const price = Math.min(...uniquePrices);
-      const oldPrice = uniquePrices.length > 1 ? Math.max(...uniquePrices) : null;
-
-      const imageUrl =
-        root.find("img").first().attr("src") ||
-        root.find("img").first().attr("data-src") ||
-        null;
-
-      const key = `${title}_${price}_${oldPrice || "n"}`;
-      if (seen.has(key)) return;
-      seen.add(key);
-
-      const promo = buildPromotion(seen.size, title, price, oldPrice, imageUrl);
-      if (promo) results.push(promo);
+        if (total >= maxScroll) {
+          clearInterval(timer);
+          resolve();
+        }
+      }, 250);
     });
   });
-
-  return results;
 }
 
-async function loadPromotions() {
-  const now = Date.now();
-
-  if (now - cache.updatedAt < 10 * 60 * 1000 && cache.items.length > 0) {
-    return cache.items;
-  }
-
-  let all = [];
-
-  for (const url of PROMO_URLS) {
+async function accept18PlusIfNeeded(page) {
+  const buttons = await page.$$("button, a, div[role='button']");
+  for (const button of buttons) {
     try {
-      const html = await fetchHtml(url);
-      const items = extractPromotionsFromHtml(html);
-      all = all.concat(items);
-    } catch (error) {
-      console.error("PROMO FETCH ERROR:", url, error.message);
+      const text = await page.evaluate((el) => (el.innerText || el.textContent || "").trim(), button);
+      if (/Так мені вже є 18/i.test(text)) {
+        await button.click({ delay: 50 });
+        await sleep(800);
+        break;
+      }
+    } catch (_) {
+      // ignore
     }
   }
+}
 
-  const unique = new Map();
-
-  all.forEach((item, index) => {
-    const normalized = {
-      ...item,
-      id: String(index + 1)
-    };
-
-    const key = `${normalized.title}_${normalized.price}_${normalized.oldPrice || "n"}`;
-    if (!unique.has(key)) {
-      unique.set(key, normalized);
-    }
+async function extractPromoItemsFromPage(page, sourceUrl) {
+  await page.goto(sourceUrl, {
+    waitUntil: "networkidle2",
+    timeout: 90000,
   });
 
-  const finalItems = [...unique.values()]
-    .filter((item) => item.oldPrice == null || item.oldPrice > item.price);
+  await sleep(2000);
+  await accept18PlusIfNeeded(page);
+  await autoScroll(page);
+  await sleep(1500);
 
-  cache = {
-    updatedAt: now,
-    items: finalItems
-  };
+  const items = await page.evaluate(() => {
+    function text(el) {
+      return (el?.innerText || el?.textContent || "")
+        .replace(/\u00A0/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+    }
 
-  return finalItems;
+    function attr(el, name) {
+      return el?.getAttribute?.(name) || "";
+    }
+
+    function findCard(el) {
+      let current = el;
+      while (current) {
+        const t = text(current);
+        const hasPrice = /\d+[.,]\d{2}\s*грн\/шт/i.test(t);
+        const hasDiscount = /-\d+%/.test(t);
+        if (hasPrice || hasDiscount) return current;
+        current = current.parentElement;
+      }
+      return el.parentElement || el;
+    }
+
+    function getImage(card) {
+      const img = card.querySelector("img");
+      if (!img) return "";
+      return (
+        img.currentSrc ||
+        attr(img, "src") ||
+        attr(img, "data-src") ||
+        attr(img, "data-lazy-src") ||
+        ""
+      ).trim();
+    }
+
+    const links = [...document.querySelectorAll('a[href*="/product/"]')];
+    const seen = new Set();
+    const result = [];
+
+    for (const link of links) {
+      const href = link.href || attr(link, "href");
+      const title = text(link);
+
+      if (!href || !title) continue;
+
+      const uniq = `${href}__${title}`;
+      if (seen.has(uniq)) continue;
+      seen.add(uniq);
+
+      const card = findCard(link);
+      const cardText = text(card);
+
+      const priceMatch = cardText.match(/(\d+[.,]\d{2})\s*грн\/шт\s*(\d+[.,]\d{2})/i);
+      const discountMatch = cardText.match(/-(\d+)%/);
+      const endDateMatch = cardText.match(/до\s*(\d{2}\.\d{2})/i);
+
+      if (!priceMatch && !discountMatch) continue;
+
+      result.push({
+        href,
+        title,
+        cardText,
+        imageUrl: getImage(card),
+        priceText: priceMatch ? priceMatch[1] : null,
+        oldPriceText: priceMatch ? priceMatch[2] : null,
+        discountText: discountMatch ? discountMatch[1] : null,
+        endDateText: endDateMatch ? endDateMatch[1] : null,
+      });
+    }
+
+    return result;
+  });
+
+  return items;
 }
 
-app.get("/promotions/atb", async (req, res) => {
+function normalizeAtbItems(rawItems) {
+  const normalized = [];
+
+  for (const raw of rawItems) {
+    const title = normalizeWhitespace(raw.title);
+    const price = parsePrice(raw.priceText);
+    const oldPrice = parsePrice(raw.oldPriceText);
+    const discountPercent = computeDiscountPercent(price, oldPrice, raw.discountText);
+
+    if (!title) continue;
+    if (!Number.isFinite(price) || !Number.isFinite(oldPrice)) continue;
+    if (!(oldPrice > price)) continue;
+
+    const endDate = parseDdMm(raw.endDateText);
+    if (raw.endDateText && !isWithinNext7Days(endDate)) {
+      continue;
+    }
+
+    normalized.push({
+      id: raw.href || title,
+      storeId: STORE_ID,
+      category: detectCategory(title),
+      brand: extractBrand(title),
+      title,
+      price,
+      oldPrice,
+      discountPercent,
+      createdAt: inferCreatedAt(endDate),
+      imageUrl: raw.imageUrl || "",
+      sourceUrl: raw.href || "",
+      promotionEndsAt: endDate ? endDate.getTime() : null,
+    });
+  }
+
+  // dedupe by sourceUrl/title
+  const map = new Map();
+  for (const item of normalized) {
+    const key = `${item.sourceUrl}__${item.title}`;
+    if (!map.has(key)) {
+      map.set(key, item);
+    }
+  }
+
+  return [...map.values()]
+    .sort((a, b) => {
+      if ((b.discountPercent || 0) !== (a.discountPercent || 0)) {
+        return (b.discountPercent || 0) - (a.discountPercent || 0);
+      }
+      return a.title.localeCompare(b.title, "uk");
+    })
+    .map((item, index) => ({
+      id: String(index + 1),
+      storeId: item.storeId,
+      category: item.category,
+      brand: item.brand,
+      title: item.title,
+      price: item.price,
+      oldPrice: item.oldPrice,
+      discountPercent: item.discountPercent,
+      createdAt: item.createdAt,
+      imageUrl: item.imageUrl,
+      sourceUrl: item.sourceUrl,
+    }));
+}
+
+async function scrapeAtbPromotions() {
+  const browser = await puppeteer.launch({
+    headless: "new",
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+      "--disable-blink-features=AutomationControlled",
+    ],
+    defaultViewport: {
+      width: 1440,
+      height: 2200,
+    },
+  });
+
   try {
-    const promotions = await loadPromotions();
-    res.json(promotions);
+    const page = await browser.newPage();
+
+    await page.setUserAgent(
+      "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    );
+
+    await page.setExtraHTTPHeaders({
+      "accept-language": "uk-UA,uk;q=0.9,en-US;q=0.8,en;q=0.7",
+    });
+
+    let allRaw = [];
+
+    for (const url of ATB_PROMO_URLS) {
+      try {
+        const items = await extractPromoItemsFromPage(page, url);
+        allRaw = allRaw.concat(items);
+      } catch (err) {
+        console.error(`ATB scrape failed for ${url}:`, err.message);
+      }
+    }
+
+    const result = normalizeAtbItems(allRaw);
+
+    if (!result.length) {
+      throw new Error("ATB scraper returned 0 real promo items");
+    }
+
+    return result;
+  } finally {
+    await browser.close();
+  }
+}
+
+app.get("/health", (_req, res) => {
+  res.json({
+    ok: true,
+    cacheAgeMs: cache.at ? Date.now() - cache.at : null,
+    cachedItems: cache.data.length,
+  });
+});
+
+app.get("/promotions/atb", async (_req, res) => {
+  try {
+    const now = Date.now();
+
+    if (cache.data.length && now - cache.at < CACHE_TTL_MS) {
+      return res.json(cache.data);
+    }
+
+    const promotions = await scrapeAtbPromotions();
+
+    cache = {
+      at: now,
+      data: promotions,
+    };
+
+    return res.json(promotions);
   } catch (error) {
-    console.error("ATB ERROR:", error);
-    res.status(500).json({
-      error: "Failed to load ATB promotions"
+    console.error("GET /promotions/atb error:", error);
+
+    // ВАЖЛИВО: не повертаємо фейкові товари
+    return res.status(502).json({
+      error: "Failed to fetch real ATB promotions",
+      details: error.message,
+      data: [],
     });
   }
 });
 
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log(`Server listening on http://localhost:${PORT}`);
 });
