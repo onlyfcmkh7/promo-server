@@ -75,6 +75,17 @@ const categoryConfigs = [
       { type: "вода сильногазована", variants: ["1.5л"] },
       { type: "вода мінеральна негазована", variants: ["1.5л"] }
     ]
+  },
+  {
+    key: "alcohol",
+    brands: ["Оболонь", "Чернігівське", "Львівське", "Stella Artois", "Garage", "Revo"],
+    products: [
+      { type: "пиво світле", variants: ["0.5л", "1л"] },
+      { type: "пиво темне", variants: ["0.5л"] },
+      { type: "пиво нефільтроване", variants: ["0.5л"] },
+      { type: "сидр", variants: ["0.5л"] },
+      { type: "напій слабоалкогольний", variants: ["0.5л"] }
+    ]
   }
 ];
 
@@ -114,7 +125,6 @@ function buildProductTitle(brand, productType, variant) {
 
 function calculatePrices(categoryKey, index) {
   const seed = index * 13;
-
   let oldPrice;
 
   switch (categoryKey) {
@@ -138,6 +148,9 @@ function calculatePrices(categoryKey, index) {
       break;
     case "water":
       oldPrice = 18 + (seed % 14);
+      break;
+    case "alcohol":
+      oldPrice = 28 + (seed % 40);
       break;
     default:
       oldPrice = 25 + (seed % 20);
@@ -172,6 +185,7 @@ function buildAtbPromotions() {
         items.push({
           id: String(id),
           storeId: 1,
+          category: category.key,
           brand,
           title,
           price,
