@@ -75,53 +75,100 @@ const categoryConfigs = [
       { type: "вода сильногазована", variants: ["1.5л"] },
       { type: "вода мінеральна негазована", variants: ["1.5л"] }
     ]
-  },
+  }
+];
+
+const alcoholCatalog = [
   {
-    key: "alcohol",
-    brands: [
-      "Оболонь",
-      "Чернігівське",
-      "Львівське",
-      "Stella Artois",
-      "Corona Extra",
-      "Garage",
-      "Revo",
-      "Shabo",
-      "Koblevo",
-      "Nemiroff",
-      "Хортиця",
-      "Absolut",
-      "Jameson",
-      "Jack Daniel's"
-    ],
+    brand: "Оболонь",
     products: [
       { type: "пиво світле", variants: ["0.5л", "1л"] },
-      { type: "пиво нефільтроване", variants: ["0.5л"] },
-      { type: "пиво lager", variants: ["0.5л"] },
-      { type: "сидр", variants: ["0.4л", "0.5л"] },
-      { type: "напій слабоалкогольний", variants: ["0.33л", "0.5л"] },
+      { type: "пиво нефільтроване", variants: ["0.5л"] }
+    ]
+  },
+  {
+    brand: "Чернігівське",
+    products: [
+      { type: "пиво світле", variants: ["0.5л", "1л"] },
+      { type: "пиво lager", variants: ["0.5л"] }
+    ]
+  },
+  {
+    brand: "Львівське",
+    products: [
+      { type: "пиво світле", variants: ["0.5л", "1л"] },
+      { type: "пиво нефільтроване", variants: ["0.5л"] }
+    ]
+  },
+  {
+    brand: "Stella Artois",
+    products: [
+      { type: "пиво lager", variants: ["0.5л"] }
+    ]
+  },
+  {
+    brand: "Corona Extra",
+    products: [
+      { type: "пиво світле", variants: ["0.33л", "0.5л"] }
+    ]
+  },
+  {
+    brand: "Garage",
+    products: [
+      { type: "сидр", variants: ["0.4л", "0.5л"] }
+    ]
+  },
+  {
+    brand: "Revo",
+    products: [
+      { type: "напій слабоалкогольний", variants: ["0.33л", "0.5л"] }
+    ]
+  },
+  {
+    brand: "Shabo",
+    products: [
       { type: "вино біле сухе", variants: ["0.75л"] },
-      { type: "вино червоне напівсолодке", variants: ["0.75л"] },
+      { type: "вино червоне напівсолодке", variants: ["0.75л"] }
+    ]
+  },
+  {
+    brand: "Koblevo",
+    products: [
+      { type: "вино біле сухе", variants: ["0.75л"] },
+      { type: "вино червоне напівсолодке", variants: ["0.75л"] }
+    ]
+  },
+  {
+    brand: "Nemiroff",
+    products: [
       { type: "горілка класична", variants: ["0.5л", "0.7л"] },
-      { type: "горілка premium", variants: ["0.5л"] },
+      { type: "горілка premium", variants: ["0.5л"] }
+    ]
+  },
+  {
+    brand: "Хортиця",
+    products: [
+      { type: "горілка класична", variants: ["0.5л", "0.7л"] },
+      { type: "горілка premium", variants: ["0.5л"] }
+    ]
+  },
+  {
+    brand: "Absolut",
+    products: [
+      { type: "горілка premium", variants: ["0.5л", "0.7л"] }
+    ]
+  },
+  {
+    brand: "Jameson",
+    products: [
       { type: "віскі", variants: ["0.5л", "0.7л"] }
-    ],
-    brandProductMap: {
-      "Оболонь": ["пиво світле", "пиво нефільтроване"],
-      "Чернігівське": ["пиво світле", "пиво lager"],
-      "Львівське": ["пиво світле", "пиво нефільтроване"],
-      "Stella Artois": ["пиво lager"],
-      "Corona Extra": ["пиво світле"],
-      "Garage": ["сидр"],
-      "Revo": ["напій слабоалкогольний"],
-      "Shabo": ["вино біле сухе", "вино червоне напівсолодке"],
-      "Koblevo": ["вино біле сухе", "вино червоне напівсолодке"],
-      "Nemiroff": ["горілка класична", "горілка premium"],
-      "Хортиця": ["горілка класична", "горілка premium"],
-      "Absolut": ["горілка premium"],
-      "Jameson": ["віскі"],
-      "Jack Daniel's": ["віскі"]
-    }
+    ]
+  },
+  {
+    brand: "Jack Daniel's",
+    products: [
+      { type: "віскі", variants: ["0.5л", "0.7л"] }
+    ]
   }
 ];
 
@@ -159,7 +206,7 @@ function buildProductTitle(brand, productType, variant) {
   return "Товар";
 }
 
-function calculatePrices(categoryKey, index) {
+function calculatePrices(categoryKey, index, productType = "") {
   const seed = index * 13;
   let oldPrice;
 
@@ -186,7 +233,17 @@ function calculatePrices(categoryKey, index) {
       oldPrice = 18 + (seed % 14);
       break;
     case "alcohol":
-      oldPrice = 35 + (seed % 320);
+      if (productType.includes("віскі")) {
+        oldPrice = 520 + (seed % 380);
+      } else if (productType.includes("горілка")) {
+        oldPrice = 160 + (seed % 220);
+      } else if (productType.includes("вино")) {
+        oldPrice = 140 + (seed % 180);
+      } else if (productType.includes("сидр") || productType.includes("слабоалкогольний")) {
+        oldPrice = 38 + (seed % 45);
+      } else {
+        oldPrice = 30 + (seed % 55);
+      }
       break;
     default:
       oldPrice = 25 + (seed % 20);
@@ -203,28 +260,20 @@ function calculatePrices(categoryKey, index) {
   };
 }
 
-function buildAtbPromotions() {
+function buildRegularPromotions(startId = 1) {
   const items = [];
-  let id = 1;
+  let id = startId;
 
   categoryConfigs.forEach((category, categoryIndex) => {
     category.brands.forEach((brand, brandIndex) => {
-      let allowedProducts = category.products;
-
-      if (category.brandProductMap && category.brandProductMap[brand]) {
-        allowedProducts = category.products.filter(product =>
-          category.brandProductMap[brand].includes(product.type)
-        );
-      }
-
-      allowedProducts.forEach((product, productIndex) => {
+      category.products.forEach((product, productIndex) => {
         const variant = pickByIndex(
           product.variants,
           categoryIndex + brandIndex + productIndex
         );
 
         const title = buildProductTitle(brand, product.type, variant);
-        const { oldPrice, price, discountPercent } = calculatePrices(category.key, id);
+        const { oldPrice, price, discountPercent } = calculatePrices(category.key, id, product.type);
 
         items.push({
           id: String(id),
@@ -243,7 +292,43 @@ function buildAtbPromotions() {
     });
   });
 
-  return items;
+  return { items, nextId: id };
+}
+
+function buildAlcoholPromotions(startId = 1) {
+  const items = [];
+  let id = startId;
+
+  alcoholCatalog.forEach((entry, brandIndex) => {
+    entry.products.forEach((product, productIndex) => {
+      const variant = pickByIndex(product.variants, brandIndex + productIndex);
+      const title = buildProductTitle(entry.brand, product.type, variant);
+      const { oldPrice, price, discountPercent } = calculatePrices("alcohol", id, product.type);
+
+      items.push({
+        id: String(id),
+        storeId: 1,
+        category: "alcohol",
+        brand: entry.brand,
+        title,
+        price,
+        oldPrice,
+        discountPercent,
+        imageUrl: null
+      });
+
+      id++;
+    });
+  });
+
+  return { items, nextId: id };
+}
+
+function buildAtbPromotions() {
+  const regular = buildRegularPromotions(1);
+  const alcohol = buildAlcoholPromotions(regular.nextId);
+
+  return [...regular.items, ...alcohol.items];
 }
 
 app.get("/promotions/atb", (req, res) => {
