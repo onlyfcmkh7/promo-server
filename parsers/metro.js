@@ -82,26 +82,40 @@ async function scrapeMetro() {
           .trim();
       }
 
-      const cards = document.querySelectorAll(".catalog-item");
-      const result = [];
+      const items = [];
+      const nodes = document.querySelectorAll("div");
 
-      cards.forEach((card) => {
-        const title = txt(card.querySelector(".catalog-item__title"));
-        const price = txt(card.querySelector(".price__value"));
-        const oldPrice = txt(card.querySelector(".price__old"));
-        const img = card.querySelector("img")?.src || "";
+      nodes.forEach((el) => {
+        const text = txt(el);
 
-        if (!title || !price || !oldPrice) return;
+        // шукаємо блок з цінами і картинкою
+        if (!/грн/i.test(text)) return;
+        if (!el.querySelector("img")) return;
 
-        result.push({
+        const prices = text.match(/(\d+[\s.,]?\d*)/g);
+        if (!prices || prices.length < 2) return;
+
+        const title =
+          txt(el.querySelector("a")) ||
+          txt(el.querySelector("span")) ||
+          txt(el.querySelector("div"));
+
+        const imageUrl =
+          el.querySelector("img")?.currentSrc ||
+          el.querySelector("img")?.src ||
+          "";
+
+        if (!title || title.length < 5) return;
+
+        items.push({
           title,
-          priceText: price,
-          oldPriceText: oldPrice,
-          imageUrl: img
+          priceText: prices[0],
+          oldPriceText: prices[1],
+          imageUrl
         });
       });
 
-      return result;
+      return items;
     });
 
     const items = rawItems
