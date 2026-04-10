@@ -38,9 +38,7 @@ function detectBrand(title) {
   const safeTitle = normalizeTitle(title);
 
   const quoted = safeTitle.match(/[«"](.*?)[»"]/);
-  if (quoted && quoted[1]) {
-    return quoted[1].trim();
-  }
+  if (quoted && quoted[1]) return quoted[1].trim();
 
   return safeTitle.split(" ")[0] || "";
 }
@@ -53,17 +51,7 @@ function isTrashTitle(title) {
     "header logo",
     "logo",
     "only_online",
-    "additional",
-    "national-cashback",
-    "cinotyzhyky",
-    "цінодіжики",
-    "cinodidjiky",
-    "katalogh-asortyment",
-    "velykden",
-    "melkoopt",
-    "rose mojito",
-    "rose spritz",
-    "redberry spritz"
+    "additional"
   ].includes(value);
 }
 
@@ -107,8 +95,8 @@ async function acceptCookies(page) {
         button
       );
 
-      if (/прийняти|accept|добре|ok|зрозуміло/i.test(text)) {
-        await button.click({ delay: 50 }).catch(() => {});
+      if (/прийняти|accept|ok|добре/i.test(text)) {
+        await button.click().catch(() => {});
         await sleep(1000);
         break;
       }
@@ -121,6 +109,7 @@ async function scrapeSilpo() {
 
   const browser = await puppeteer.launch({
     headless: "new",
+    protocolTimeout: 120000, // ✅ FIX
     args: [
       "--no-sandbox",
       "--disable-setuid-sandbox",
@@ -136,7 +125,7 @@ async function scrapeSilpo() {
     );
 
     await page.goto(SILPO_URL, {
-      waitUntil: "networkidle2",
+      waitUntil: "domcontentloaded", // ✅ FIX
       timeout: 60000
     });
 
@@ -146,110 +135,49 @@ async function scrapeSilpo() {
     await sleep(2500);
 
     const rawItems = await page.evaluate(() => {
-      function txt(el) {
-        return (el?.innerText || el?.textContent || "")
-          .replace(/\s+/g, " ")
-          .trim();
-      }
-
-      function isBadAlt(alt) {
-        const value = String(alt || "").trim().toLowerCase();
-
-        return [
-          "",
-          "header logo",
-          "logo",
-          "only_online",
-          "additional",
-          "national-cashback",
-          "cinotyzhyky",
-          "цінодіжики",
-          "cinodidjiky",
-          "katalogh-asortyment",
-          "velykden",
-          "melkoopt"
-        ].includes(value);
-      }
-
-      function getImgUrl(img) {
-        return (
-          img.currentSrc ||
-          img.src ||
-          img.getAttribute("src") ||
-          img.getAttribute("data-src") ||
-          img.getAttribute("data-lazy-src") ||
-          ""
-        );
-      }
-
-      function isProductImage(url) {
-        const value = String(url || "").trim().toLowerCase();
-
-        if (!value) return false;
-        if (value.includes("content.silpo.ua/hermes/")) return false;
-        if (value.includes("logotype.svg")) return false;
-        if (value.endsWith(".svg")) return false;
-
-        return (
-          value.includes("images.silpo.ua") &&
-          (value.includes("/products/") || value.includes("/v2/products/"))
-        );
-      }
-
-      function findPromoCard(startNode) {
-        let current = startNode;
-
-        while (current) {
-          const text = txt(current);
-
-          if (
-            /(\d[\d\s.,]*)\s*грн/i.test(text) &&
-            /(\d[\d\s.,]*)\s*грн[\s\S]*?(\d[\d\s.,]*)\s*грн/i.test(text) &&
-            /-\s*\d+%/i.test(text)
-          ) {
-            return current;
-          }
-
-          current = current.parentElement;
+      try {
+        function txt(el) {
+          return (el?.innerText || el?.textContent || "")
+            .replace(/\s+/g, " ")
+            .trim();
         }
 
-        return null;
+        const images = [...document.querySelectorAll("img[alt]")];
+        const result = [];
+
+        for (const img of images) {
+          const title = (img.getAttribute("alt") || "").trim();
+          if (!title || title.length < 5) continue;
+
+          const card = img.closest("div");
+          if (!card) continue;
+
+          const text = txt(card);
+
+          const match = text.match(
+            /(\d[\d\s.,]*)\s*грн[\s\S]*?(\d[\d\s.,]*)\s*грн[\s\S]*?-\s*(\d+)%/i
+          );
+
+          if (!match) continue;
+
+          const imageUrl =
+            img.currentSrc ||
+            img.src ||
+            img.getAttribute("src") ||
+            "";
+
+          result.push({
+            title,
+            priceText: match[1],
+            oldPriceText: match[2],
+            imageUrl
+          });
+        }
+
+        return result;
+      } catch (e) {
+        return [];
       }
-
-      const images = [...document.querySelectorAll("img[alt]")];
-      const result = [];
-
-      for (const img of images) {
-        const title = String(img.getAttribute("alt") || "")
-          .replace(/\s+/g, " ")
-          .trim();
-
-        const imageUrl = getImgUrl(img);
-
-        if (!title || title.length < 5) continue;
-        if (isBadAlt(title)) continue;
-        if (!/[а-яіїєґa-z0-9]/i.test(title)) continue;
-        if (!isProductImage(imageUrl)) continue;
-
-        const card = findPromoCard(img);
-        if (!card) continue;
-
-        const text = txt(card);
-        const match = text.match(
-          /(\d[\d\s.,]*)\s*грн[\s\S]*?(\d[\d\s.,]*)\s*грн[\s\S]*?-\s*(\d+)%/i
-        );
-
-        if (!match) continue;
-
-        result.push({
-          title,
-          priceText: match[1],
-          oldPriceText: match[2],
-          imageUrl
-        });
-      }
-
-      return result;
     });
 
     const parsedItems = rawItems
@@ -261,7 +189,6 @@ async function scrapeSilpo() {
 
         if (!title || isTrashTitle(title)) return null;
         if (!price || !oldPrice || !(oldPrice > price)) return null;
-        if (!imageUrl) return null;
 
         return {
           title,
@@ -278,12 +205,7 @@ async function scrapeSilpo() {
       const key = `${item.title}|${item.price}|${item.oldPrice}`;
       const existing = deduped.get(key);
 
-      if (!existing) {
-        deduped.set(key, item);
-        continue;
-      }
-
-      if (getImageScore(item.imageUrl) > getImageScore(existing.imageUrl)) {
+      if (!existing || getImageScore(item.imageUrl) > getImageScore(existing.imageUrl)) {
         deduped.set(key, item);
       }
     }
@@ -296,12 +218,16 @@ async function scrapeSilpo() {
       price: item.price,
       oldPrice: item.oldPrice,
       discountPercent: Math.round(((item.oldPrice - item.price) / item.oldPrice) * 100),
-      imageUrl: item.imageUrl
+      imageUrl: item.imageUrl,
+      createdAt: Date.now()
     }));
 
     console.log("✅ FINAL SILPO:", items.length);
 
     return items;
+  } catch (e) {
+    console.log("❌ SILPO ERROR:", e.message);
+    return [];
   } finally {
     await browser.close();
   }
