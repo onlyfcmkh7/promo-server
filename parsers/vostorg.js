@@ -1,6 +1,6 @@
 const puppeteer = require("puppeteer");
 
-const VOSTORG_URL = "https://vostorg.zakaz.ua/ru/custom-categories/promotions/";
+const VOSTORG_URL = "https://vostorg.zakaz.ua/ru/offers/";
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -20,8 +20,6 @@ function parsePrice(value) {
 
 function normalizeTitle(title) {
   return String(title || "")
-    .replace(/&quot;/g, '"')
-    .replace(/&amp;/g, "&")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -32,8 +30,10 @@ function detectBrand(title) {
 
 function normalizeImageUrl(url) {
   if (!url) return "";
+
   if (url.startsWith("//")) return `https:${url}`;
   if (url.startsWith("/")) return `https://vostorg.zakaz.ua${url}`;
+
   return url;
 }
 
@@ -41,13 +41,13 @@ async function autoScroll(page) {
   await page.evaluate(async () => {
     await new Promise((resolve) => {
       let total = 0;
-      const distance = 700;
+      const distance = 600;
 
       const timer = setInterval(() => {
         window.scrollBy(0, distance);
         total += distance;
 
-        if (total >= document.body.scrollHeight + 2000) {
+        if (total >= document.body.scrollHeight + 1500) {
           clearInterval(timer);
           resolve();
         }
@@ -57,7 +57,7 @@ async function autoScroll(page) {
 }
 
 async function scrapeVostorg() {
-  console.log("🚀 START SCRAPING VOSTORG");
+  console.log("🚀 START SCRAPING VOSTORG OFFERS");
 
   const browser = await puppeteer.launch({
     headless: "new",
@@ -82,50 +82,87 @@ async function scrapeVostorg() {
 
     await sleep(3000);
     await autoScroll(page);
-    await sleep(2500);
+    await sleep(2000);
 
-    const html = await page.content();
+    const rawItems = await page.evaluate(() => {
+      function txt(el) {
+        return (el?.innerText || el?.textContent || "")
+          .replace(/\s+/g, " ")
+          .trim();
+      }
 
-    const productRegex =
-      /<img[^>]+src="([^"]+)"[^>]*>[\s\S]{0,1200}?([A-Za-zА-Яа-яІіЇїЄєҐґ0-9"'`’\-\–\.,%\/\s\(\)]+)[\s\S]{0,600}?(\d[\d\s.,]*)\s*₴[\s\S]{0,120}?(\d[\d\s.,]*)\s*₴/g;
+      function getImg(el) {
+        const img = el.querySelector("img");
+        if (!img) return "";
 
-    const rawItems = [];
-    const seen = new Set();
+        return (
+          img.currentSrc ||
+          img.src ||
+          img.getAttribute("src") ||
+          img.getAttribute("data-src") ||
+          ""
+        );
+      }
 
-    for (const match of html.matchAll(productRegex)) {
-      const imageUrl = normalizeImageUrl(match[1]);
-      const title = normalizeTitle(match[2]);
-      const oldPrice = parsePrice(match[3]);
-      const price = parsePrice(match[4]);
+      const result = [];
+      const seen = new Set();
+      const nodes = Array.from(document.querySelectorAll("div, article, section, a, li"));
 
-      if (!title || title.length < 4) continue;
-      if (!imageUrl) continue;
-      if (!price || !oldPrice || !(oldPrice > price)) continue;
+      for (const node of nodes) {
+        const text = txt(node);
+        if (!text) continue;
 
-      const key = `${title}|${price}|${oldPrice}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
+        const prices = [...text.matchAll(/(\d[\d\s.,]*)\s*[₴грн]/gi)].map((m) => m[1]);
+        if (prices.length < 2) continue;
 
-      rawItems.push({
-        title,
-        price,
-        oldPrice,
-        imageUrl
-      });
-    }
+        const title =
+          txt(node.querySelector("h1, h2, h3, h4")) ||
+          txt(node.querySelector("p")) ||
+          txt(node.querySelector("span")) ||
+          txt(node.querySelector("a"));
 
-    const items = rawItems.map((item, i) => ({
-      id: String(i + 1),
-      storeId: 5,
-      title: item.title,
-      brand: detectBrand(item.title),
-      price: item.price,
-      oldPrice: item.oldPrice,
-      discountPercent: Math.round(
-        ((item.oldPrice - item.price) / item.oldPrice) * 100
-      ),
-      imageUrl: item.imageUrl
-    }));
+        const imageUrl = getImg(node);
+
+        if (!title || title.length < 4) continue;
+        if (!imageUrl) continue;
+
+        const key = `${title}|${prices[0]}|${prices[1]}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+
+        result.push({
+          title,
+          oldPriceText: prices[0],
+          priceText: prices[1],
+          imageUrl
+        });
+      }
+
+      return result;
+    });
+
+    const items = rawItems
+      .map((item, i) => {
+        const title = normalizeTitle(item.title);
+        const price = parsePrice(item.priceText);
+        const oldPrice = parsePrice(item.oldPriceText);
+        const imageUrl = normalizeImageUrl(item.imageUrl);
+
+        if (!title) return null;
+        if (!price || !oldPrice || !(oldPrice > price)) return null;
+
+        return {
+          id: String(i + 1),
+          storeId: 5,
+          title,
+          brand: detectBrand(title),
+          price,
+          oldPrice,
+          discountPercent: Math.round(((oldPrice - price) / oldPrice) * 100),
+          imageUrl
+        };
+      })
+      .filter(Boolean);
 
     console.log("✅ FINAL VOSTORG:", items.length);
 
