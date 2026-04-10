@@ -1,6 +1,6 @@
 const puppeteer = require("puppeteer");
 
-const SILPO_URL = "https://silpo.ua/offers";
+const SILPO_URL = "https://silpo.ua/";
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -8,12 +8,21 @@ function sleep(ms) {
 
 function parsePrice(value) {
   if (!value) return null;
+
   const cleaned = String(value)
     .replace(/\s+/g, "")
     .replace(",", ".")
     .replace(/[^\d.]/g, "");
+
   const num = Number(cleaned);
   return Number.isFinite(num) ? num : null;
+}
+
+function normalizeImageUrl(url) {
+  if (!url) return "";
+  if (url.startsWith("//")) return `https:${url}`;
+  if (url.startsWith("/")) return `https://silpo.ua${url}`;
+  return url;
 }
 
 function detectBrand(title) {
@@ -24,14 +33,15 @@ function detectBrand(title) {
     return quoted[1].trim();
   }
 
-  return safeTitle.split(" ")[0] || "";
+  const words = safeTitle.split(/\s+/).filter(Boolean);
+  return words[0] || "";
 }
 
 async function autoScroll(page) {
   await page.evaluate(async () => {
     await new Promise((resolve) => {
       let total = 0;
-      const distance = 500;
+      const distance = 600;
 
       const timer = setInterval(() => {
         window.scrollBy(0, distance);
@@ -41,7 +51,7 @@ async function autoScroll(page) {
           clearInterval(timer);
           resolve();
         }
-      }, 200);
+      }, 250);
     });
   });
 }
@@ -56,8 +66,8 @@ async function acceptCookies(page) {
         button
       );
 
-      if (/прийняти|accept|добре|ok/i.test(text)) {
-        await button.click({ delay: 50 });
+      if (/прийняти|accept|добре|ok|зрозуміло/i.test(text)) {
+        await button.click({ delay: 50 }).catch(() => {});
         await sleep(1000);
         break;
       }
@@ -70,7 +80,11 @@ async function scrapeSilpo() {
 
   const browser = await puppeteer.launch({
     headless: "new",
-    args: ["--no-sandbox", "--disable-dev-shm-usage"]
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage"
+    ]
   });
 
   try {
@@ -85,10 +99,12 @@ async function scrapeSilpo() {
       timeout: 60000
     });
 
+    console.log("SILPO PAGE URL:", page.url());
+
     await sleep(3000);
     await acceptCookies(page);
     await autoScroll(page);
-    await sleep(2000);
+    await sleep(2500);
 
     const rawItems = await page.evaluate(() => {
       function txt(el) {
@@ -98,7 +114,27 @@ async function scrapeSilpo() {
       }
 
       function getImage(card) {
-        const img = card.querySelector("img[alt]");
+        const imgs = [...card.querySelectorAll("img[alt]")];
+
+        const img = imgs.find((item) => {
+          const alt = String(item.getAttribute("alt") || "")
+            .trim()
+            .toLowerCase();
+
+          return ![
+            "",
+            "header logo",
+            "logo",
+            "only_online",
+            "additional",
+            "national-cashback",
+            "cinotyzhyky",
+            "цінодіжики",
+            "katalogh-asortyment",
+            "velykden"
+          ].includes(alt);
+        });
+
         if (!img) return "";
 
         return (
@@ -106,38 +142,80 @@ async function scrapeSilpo() {
           img.src ||
           img.getAttribute("src") ||
           img.getAttribute("data-src") ||
+          img.getAttribute("data-lazy-src") ||
           ""
         );
       }
 
-      function isBadAlt(value) {
-        const alt = String(value || "").trim().toLowerCase();
+      function getTitle(card) {
+        const imgs = [...card.querySelectorAll("img[alt]")];
 
-        return [
-          "",
-          "header logo",
-          "only_online",
-          "logo"
-        ].includes(alt);
+        const img = imgs.find((item) => {
+          const alt = String(item.getAttribute("alt") || "")
+            .trim()
+            .toLowerCase();
+
+          return ![
+            "",
+            "header logo",
+            "logo",
+            "only_online",
+            "additional",
+            "national-cashback",
+            "cinotyzhyky",
+            "цінодіжики",
+            "katalogh-asortyment",
+            "velykden"
+          ].includes(alt);
+        });
+
+        return img ? String(img.getAttribute("alt") || "").trim() : "";
       }
 
-      const cards = [...document.querySelectorAll("a, div, li, article")];
-      const result = [];
+      function findPromoNodes() {
+        const nodes = [...document.querySelectorAll("a, article, li, div")];
+
+        return nodes.filter((node) => {
+          const text = txt(node);
+
+          if (!/грн/i.test(text)) return false;
+          if (!/-\s*\d+%/i.test(text)) return false;
+
+          const title = getTitle(node);
+          if (!title) return false;
+          if (title.length < 5) return false;
+          if (!/[а-яіїєґa-z0-9]/i.test(title)) return false;
+
+          return true;
+        });
+      }
+
+      function dedupeNested(nodes) {
+        const result = [];
+
+        for (const node of nodes) {
+          const overlaps = result.some(
+            (existing) => existing.contains(node) || node.contains(existing)
+          );
+
+          if (!overlaps) {
+            result.push(node);
+          }
+        }
+
+        return result;
+      }
+
+      const cards = dedupeNested(findPromoNodes());
       const seen = new Set();
+      const result = [];
 
       for (const card of cards) {
         const text = txt(card);
+        const title = getTitle(card);
+        const imageUrl = getImage(card);
 
-        if (!/грн/i.test(text) || !/-\s*\d+%/i.test(text)) continue;
-
-        const img = card.querySelector("img[alt]");
-        if (!img) continue;
-
-        const title = img.getAttribute("alt")?.trim();
-        if (!title || isBadAlt(title)) continue;
-
-        if (!/[а-яіїєґa-z]/i.test(title)) continue;
-        if (title.length < 5) continue;
+        if (!title || !imageUrl) continue;
 
         const match = text.match(
           /(\d[\d\s.,]*)\s*грн[\s\S]*?(\d[\d\s.,]*)\s*грн[\s\S]*?-\s*(\d+)%/i
@@ -148,7 +226,7 @@ async function scrapeSilpo() {
         const priceText = match[1];
         const oldPriceText = match[2];
 
-        const key = `${title}|${priceText}|${oldPriceText}`;
+        const key = `${title}|${priceText}|${oldPriceText}|${imageUrl}`;
         if (seen.has(key)) continue;
         seen.add(key);
 
@@ -156,7 +234,7 @@ async function scrapeSilpo() {
           title,
           priceText,
           oldPriceText,
-          imageUrl: getImage(card)
+          imageUrl
         });
       }
 
@@ -164,6 +242,7 @@ async function scrapeSilpo() {
     });
 
     console.log("🔍 FOUND SILPO RAW:", rawItems.length);
+    console.log("🔍 SAMPLE SILPO RAW:", rawItems.slice(0, 5));
 
     const items = rawItems
       .map((item, i) => {
@@ -180,7 +259,7 @@ async function scrapeSilpo() {
           price,
           oldPrice,
           discountPercent: Math.round(((oldPrice - price) / oldPrice) * 100),
-          imageUrl: item.imageUrl
+          imageUrl: normalizeImageUrl(item.imageUrl)
         };
       })
       .filter(Boolean);
