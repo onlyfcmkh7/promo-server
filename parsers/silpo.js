@@ -1,9 +1,8 @@
 const puppeteer = require("puppeteer");
 
-const SILPO_URL = "https://silpo.ua/search";
-
+const SILPO_OFFERS_URL = "https://silpo.ua/offers";
 const STORE_NUMERIC_ID = 2;
-const LIMIT_PER_CATEGORY = 10;
+const LIMIT_TOTAL = 200;
 
 const CATEGORY_ORDER = [
   "dairy",
@@ -21,23 +20,6 @@ const CATEGORY_ORDER = [
   "low_alcohol",
   "strong_alcohol"
 ];
-
-const CATEGORY_QUERIES = {
-  dairy: ["молоко", "кефір", "йогурт", "сир", "масло", "сметана"],
-  bread: ["хліб", "батон", "багет", "лаваш", "булочка"],
-  chicken: ["курка", "куряче філе", "стегно куряче", "гомілка куряча"],
-  pork: ["свинина", "свинячий ошийок", "свиняча лопатка", "свинячі ребра"],
-  veal: ["телятина", "теляче м'ясо", "теляча вирізка"],
-  fish: ["риба", "лосось", "форель", "оселедець", "скумбрія"],
-  seafood: ["креветки", "мідії", "кальмар", "морепродукти"],
-  sauces: ["кетчуп", "майонез", "соус", "гірчиця", "соєвий соус"],
-  oil: ["олія", "оливкова олія", "соняшникова олія"],
-  chocolate: ["шоколад", "шоколадка"],
-  water: ["вода", "мінеральна вода", "газована вода", "негазована вода"],
-  beer: ["пиво", "lager", "ale"],
-  low_alcohol: ["сидр", "слабоалкогольний напій", "hard seltzer", "коктейль алкогольний"],
-  strong_alcohol: ["горілка", "віскі", "коньяк", "ром", "джин", "текіла", "бренді", "лікер"]
-};
 
 const CATEGORY_REGEX = {
   dairy: /\b(молоко|кефір|ряжанка|йогурт|сир|творог|кисломолочн|сметан|вершк|масло\b|моцарел|бринз|фет[аи]?|гауд|чедер|пармезан|маскарпоне|рікот|айран)\b/i,
@@ -61,7 +43,7 @@ function sleep(ms) {
 }
 
 function parsePrice(value) {
-  if (value === null || value === undefined || value === "") {
+  if (!value && value !== 0) {
     return null;
   }
 
@@ -69,11 +51,6 @@ function parsePrice(value) {
     if (!Number.isFinite(value)) {
       return null;
     }
-
-    if (value > 1000) {
-      return Number((value / 100).toFixed(2));
-    }
-
     return Number(value.toFixed(2));
   }
 
@@ -87,16 +64,7 @@ function parsePrice(value) {
   }
 
   const parsed = Number(cleaned);
-
-  if (!Number.isFinite(parsed)) {
-    return null;
-  }
-
-  if (parsed > 1000) {
-    return Number((parsed / 100).toFixed(2));
-  }
-
-  return Number(parsed.toFixed(2));
+  return Number.isFinite(parsed) ? Number(parsed.toFixed(2)) : null;
 }
 
 function normalizeTitle(title) {
@@ -118,7 +86,7 @@ function detectCategory(title) {
     }
   }
 
-  return null;
+  return "other";
 }
 
 function normalizeImageUrl(url) {
@@ -143,19 +111,7 @@ function normalizeImageUrl(url) {
   return value;
 }
 
-function detectBrand(title, item = {}) {
-  const directBrand =
-    item.brandTitle ||
-    item.brand ||
-    item.tm ||
-    item.manufacturer ||
-    item.tradeMark ||
-    item.trade_mark;
-
-  if (directBrand) {
-    return String(directBrand).trim();
-  }
-
+function detectBrand(title) {
   const safeTitle = normalizeTitle(title);
   const quoted = safeTitle.match(/"([^"]+)"/);
 
@@ -181,83 +137,10 @@ function calculateDiscountPercent(price, oldPrice) {
   return Math.round(((oldPrice - price) / oldPrice) * 100);
 }
 
-function buildProductRecord(item, forcedCategory) {
-  const title = normalizeTitle(item.title || item.name || "");
-  if (!title) {
-    return null;
-  }
-
-  const detectedCategory = detectCategory(title);
-  const category = forcedCategory || detectedCategory;
-
-  if (!category) {
-    return null;
-  }
-
-  const price = parsePrice(
-    item.displayPrice ??
-      item.price ??
-      item.currentPrice ??
-      item.display_price
-  );
-
-  if (price === null || price <= 0) {
-    return null;
-  }
-
-  let oldPrice = parsePrice(
-    item.displayOldPrice ??
-      item.oldPrice ??
-      item.old_price ??
-      item.displayOld_price
-  );
-
-  if (oldPrice === null || oldPrice <= 0) {
-    oldPrice = price;
-  }
-
-  if (oldPrice < price) {
-    oldPrice = price;
-  }
-
-  const imageUrl = normalizeImageUrl(
-    item.iconPath ||
-      item.image ||
-      item.imageUrl ||
-      item.photo ||
-      item.mainImage ||
-      ""
-  );
-
-  return {
-    id: String(
-      item.id ||
-        item.offerId ||
-        item.externalProductId ||
-        item.slug ||
-        item.article ||
-        title
-    ).trim(),
-    storeId: STORE_NUMERIC_ID,
-    category,
-    brand: detectBrand(title, item),
-    title,
-    price,
-    oldPrice,
-    discountPercent: calculateDiscountPercent(price, oldPrice),
-    imageUrl,
-    createdAt: Date.now()
-  };
-}
-
 async function acceptCookies(page) {
-  const candidates = [
-    "button",
-    "[role='button']",
-    "a"
-  ];
+  const selectors = ["button", "a", "[role='button']"];
 
-  for (const selector of candidates) {
+  for (const selector of selectors) {
     const elements = await page.$$(selector);
 
     for (const element of elements) {
@@ -267,7 +150,7 @@ async function acceptCookies(page) {
           element
         );
 
-        if (/прийняти|accept|ok|добре|зрозуміло/i.test(text)) {
+        if (/прийняти|accept|добре|ok|зрозуміло/i.test(text)) {
           await element.click({ delay: 50 }).catch(() => {});
           await sleep(1000);
           return;
@@ -277,176 +160,185 @@ async function acceptCookies(page) {
   }
 }
 
-async function extractItemsFromPage(page) {
-  return page.evaluate(() => {
-    function readStateScript() {
-      const script = document.querySelector('#serverApp-state');
-      if (!script) {
-        return null;
-      }
+async function autoScroll(page) {
+  await page.evaluate(async () => {
+    await new Promise((resolve) => {
+      let totalHeight = 0;
+      const distance = 800;
+      let idleTicks = 0;
+      let lastHeight = document.body.scrollHeight;
 
-      const raw = script.textContent || script.innerHTML || "";
-      if (!raw.trim()) {
-        return null;
-      }
+      const timer = setInterval(() => {
+        window.scrollBy(0, distance);
+        totalHeight += distance;
 
-      try {
-        return JSON.parse(raw);
-      } catch (_) {
-        return null;
-      }
-    }
+        const currentHeight = document.body.scrollHeight;
 
-    function collectItems(node, collector) {
-      if (!node) {
-        return;
-      }
-
-      if (Array.isArray(node)) {
-        for (const item of node) {
-          collectItems(item, collector);
+        if (currentHeight === lastHeight) {
+          idleTicks += 1;
+        } else {
+          idleTicks = 0;
+          lastHeight = currentHeight;
         }
-        return;
-      }
 
-      if (typeof node !== "object") {
-        return;
-      }
-
-      const title = node.title || node.name;
-      const hasPrice =
-        node.price !== undefined ||
-        node.displayPrice !== undefined ||
-        node.currentPrice !== undefined;
-
-      if (title && hasPrice) {
-        collector.push(node);
-      }
-
-      if (Array.isArray(node.items)) {
-        for (const item of node.items) {
-          if (item && typeof item === "object") {
-            collector.push(item);
-          }
+        if (idleTicks >= 5 || totalHeight >= currentHeight + 3000) {
+          clearInterval(timer);
+          resolve();
         }
-      }
-
-      for (const value of Object.values(node)) {
-        collectItems(value, collector);
-      }
-    }
-
-    const state = readStateScript();
-    if (!state) {
-      return [];
-    }
-
-    const collected = [];
-    collectItems(state, collected);
-
-    const unique = new Map();
-
-    for (const item of collected) {
-      const key = String(
-        item.id ||
-          item.offerId ||
-          item.externalProductId ||
-          item.slug ||
-          item.title ||
-          item.name ||
-          Math.random()
-      );
-
-      if (!unique.has(key)) {
-        unique.set(key, item);
-      }
-    }
-
-    return Array.from(unique.values());
+      }, 500);
+    });
   });
 }
 
-async function searchProducts(page, query) {
-  try {
-    const url = `${SILPO_URL}?find=${encodeURIComponent(query)}`;
+async function extractOfferItems(page) {
+  return page.evaluate(() => {
+    function text(node) {
+      return String(node?.innerText || node?.textContent || "")
+        .replace(/\s+/g, " ")
+        .trim();
+    }
 
-    console.log("SILPO QUERY:", query);
+    function getImageUrl(node) {
+      if (!node) return "";
+      return (
+        node.currentSrc ||
+        node.src ||
+        node.getAttribute("src") ||
+        node.getAttribute("data-src") ||
+        ""
+      );
+    }
 
-    await page.goto(url, {
-      waitUntil: "domcontentloaded",
-      timeout: 60000
-    });
+    function closestCard(node) {
+      let current = node;
 
-    await sleep(2500);
-    await acceptCookies(page);
-    await sleep(1500);
+      while (current) {
+        const value = text(current);
 
-    await page.waitForSelector("#serverApp-state", {
-      timeout: 15000
-    }).catch(() => {});
+        if (
+          /грн/i.test(value) &&
+          (
+            /-\s*\d+%/i.test(value) ||
+            /акція|ціна тижня|вигода/i.test(value)
+          )
+        ) {
+          return current;
+        }
 
-    const items = await extractItemsFromPage(page);
+        current = current.parentElement;
+      }
 
-    console.log(`QUERY "${query}" RAW PRODUCTS:`, items.length);
+      return null;
+    }
 
-    return items;
-  } catch (error) {
-    console.error(`Silpo search error for query "${query}":`, error.message);
-    return [];
-  }
+    const images = Array.from(document.querySelectorAll("img[alt]"));
+    const result = [];
+
+    for (const image of images) {
+      const title = text({ innerText: image.getAttribute("alt") || "" });
+      const imageUrl = getImageUrl(image);
+
+      if (!title || title.length < 4) {
+        continue;
+      }
+
+      if (!/images\.silpo\.ua|silpo\.ua/i.test(imageUrl)) {
+        continue;
+      }
+
+      const card = closestCard(image);
+      if (!card) {
+        continue;
+      }
+
+      const cardText = text(card);
+
+      const prices = cardText.match(/\d[\d\s.,]*/g) || [];
+      const parsedPrices = prices
+        .map((item) => {
+          const value = Number(
+            String(item)
+              .replace(/\s+/g, "")
+              .replace(",", ".")
+          );
+
+          return Number.isFinite(value) ? value : null;
+        })
+        .filter((item) => item !== null);
+
+      if (parsedPrices.length === 0) {
+        continue;
+      }
+
+      const discountMatch = cardText.match(/-\s*(\d+)%/i);
+
+      let price = parsedPrices[0] || null;
+      let oldPrice = parsedPrices[1] || null;
+
+      if (oldPrice !== null && price !== null && oldPrice < price) {
+        const temp = oldPrice;
+        oldPrice = price;
+        price = temp;
+      }
+
+      result.push({
+        title,
+        price,
+        oldPrice,
+        discountPercent: discountMatch ? Number(discountMatch[1]) : null,
+        imageUrl
+      });
+    }
+
+    return result;
+  });
 }
 
-async function getCategoryProducts(page, category) {
-  const queries = CATEGORY_QUERIES[category] || [category];
-  const uniqueProducts = new Map();
-
-  console.log(`CATEGORY START: ${category}`);
-
-  for (const query of queries) {
-    if (uniqueProducts.size >= LIMIT_PER_CATEGORY) {
-      break;
-    }
-
-    const rawProducts = await searchProducts(page, query);
-
-    for (const rawProduct of rawProducts) {
-      const builtProduct = buildProductRecord(rawProduct, category);
-
-      if (!builtProduct) {
-        continue;
-      }
-
-      const detected = detectCategory(builtProduct.title);
-
-      if (detected && detected !== category) {
-        continue;
-      }
-
-      const uniqueKey = `${builtProduct.category}|${builtProduct.id}|${builtProduct.title.toLowerCase()}`;
-
-      if (!uniqueProducts.has(uniqueKey)) {
-        uniqueProducts.set(uniqueKey, builtProduct);
-      }
-
-      if (uniqueProducts.size >= LIMIT_PER_CATEGORY) {
-        break;
-      }
-    }
+function mapOfferItem(rawItem, index) {
+  const title = normalizeTitle(rawItem.title);
+  if (!title) {
+    return null;
   }
 
-  const result = Array.from(uniqueProducts.values()).slice(0, LIMIT_PER_CATEGORY);
+  const price = parsePrice(rawItem.price);
+  if (price === null || price <= 0) {
+    return null;
+  }
 
-  console.log(`CATEGORY DONE: ${category} =>`, result.length);
+  let oldPrice = parsePrice(rawItem.oldPrice);
+  if (oldPrice === null || oldPrice <= 0) {
+    oldPrice = price;
+  }
 
-  return result;
+  if (oldPrice < price) {
+    oldPrice = price;
+  }
+
+  const discountPercent =
+    rawItem.discountPercent && rawItem.discountPercent > 0
+      ? rawItem.discountPercent
+      : calculateDiscountPercent(price, oldPrice);
+
+  return {
+    id: String(index + 1),
+    storeId: STORE_NUMERIC_ID,
+    category: detectCategory(title),
+    brand: detectBrand(title),
+    title,
+    price,
+    oldPrice,
+    discountPercent,
+    imageUrl: normalizeImageUrl(rawItem.imageUrl),
+    createdAt: Date.now()
+  };
 }
 
 async function scrapeSilpo() {
-  console.log("scrapeSilpo started");
+  console.log("🚀 START SILPO OFFERS");
 
   const browser = await puppeteer.launch({
     headless: "new",
-    protocolTimeout: 120000,
+    protocolTimeout: 180000,
     args: [
       "--no-sandbox",
       "--disable-setuid-sandbox",
@@ -465,30 +357,65 @@ async function scrapeSilpo() {
       "Accept-Language": "uk-UA,uk;q=0.9,en;q=0.8"
     });
 
-    const allProducts = [];
-    const globalUnique = new Map();
+    await page.setRequestInterception(true);
 
-    for (const category of CATEGORY_ORDER) {
-      const categoryProducts = await getCategoryProducts(page, category);
+    page.on("request", (request) => {
+      const resourceType = request.resourceType();
+      const url = request.url();
 
-      for (const product of categoryProducts) {
-        const uniqueKey = `${product.category}|${product.title.toLowerCase()}|${product.price}|${product.oldPrice}`;
-
-        if (!globalUnique.has(uniqueKey)) {
-          globalUnique.set(uniqueKey, product);
-        }
+      if (
+        resourceType === "font" ||
+        resourceType === "media" ||
+        resourceType === "websocket" ||
+        url.includes("doubleclick.net") ||
+        url.includes("google-analytics.com") ||
+        url.includes("googletagmanager.com") ||
+        url.includes("facebook.net") ||
+        url.includes("clarity.ms")
+      ) {
+        request.abort();
+        return;
       }
-    }
 
-    for (const product of globalUnique.values()) {
-      allProducts.push(product);
-    }
+      request.continue();
+    });
 
-    console.log("SILPO FINAL:", allProducts.length);
+    await page.goto(SILPO_OFFERS_URL, {
+      waitUntil: "domcontentloaded",
+      timeout: 60000
+    });
 
-    return allProducts;
+    await sleep(3000);
+    await acceptCookies(page);
+    await autoScroll(page);
+    await sleep(2500);
+
+    const rawItems = await extractOfferItems(page);
+
+    console.log("SILPO RAW OFFERS:", rawItems.length);
+
+    const deduped = new Map();
+
+    rawItems.forEach((rawItem, index) => {
+      const item = mapOfferItem(rawItem, index);
+      if (!item) {
+        return;
+      }
+
+      const key = `${item.title.toLowerCase()}|${item.price}|${item.oldPrice}`;
+
+      if (!deduped.has(key)) {
+        deduped.set(key, item);
+      }
+    });
+
+    const items = Array.from(deduped.values()).slice(0, LIMIT_TOTAL);
+
+    console.log("SILPO FINAL OFFERS:", items.length);
+
+    return items;
   } catch (error) {
-    console.error("SILPO SCRAPE ERROR:", error.message);
+    console.error("SILPO OFFERS ERROR:", error.message);
     return [];
   } finally {
     await browser.close();
@@ -499,6 +426,5 @@ module.exports = {
   parsePrice,
   normalizeTitle,
   detectCategory,
-  getCategoryProducts,
   scrapeSilpo
 };
