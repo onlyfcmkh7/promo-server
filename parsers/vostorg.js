@@ -2,32 +2,49 @@ const axios = require("axios");
 
 const STORE_ID = "482320001";
 
-async function scrapeVostorg(query = "молоко") {
-  console.log("🚀 START VOSTORG API");
+function parsePrice(value) {
+  if (!value) return null;
+  return Number(value) / 100;
+}
+
+async function scrapeVostorg() {
+  console.log("🚀 START VOSTORG PROMOTIONS");
 
   try {
-    const url = `https://stores-api.zakaz.ua/stores/${STORE_ID}/products/search?q=${encodeURIComponent(query)}`;
+    const url = `https://stores-api.zakaz.ua/stores/${STORE_ID}/custom-categories/promotions/products/`;
 
     const res = await axios.get(url);
 
     const products = res.data.results || [];
 
-    const items = products.map((p, i) => {
-      const price = p.price / 100;
+    console.log("🔍 FOUND RAW:", products.length);
 
-      return {
-        id: p.id || String(i),
-        storeId: 5,
-        title: p.title,
-        price,
-        oldPrice: null, // поки нема
-        discountPercent: null,
-        imageUrl: p.image_url || null,
-        createdAt: Date.now()
-      };
-    });
+    const items = products
+      .map((p, i) => {
+        const price = parsePrice(p.price);
+        const oldPrice = parsePrice(p.old_price);
 
-    console.log("✅ VOSTORG:", items.length);
+        if (!price) return null;
+
+        const discountPercent =
+          oldPrice && oldPrice > price
+            ? Math.round(((oldPrice - price) / oldPrice) * 100)
+            : null;
+
+        return {
+          id: p.id || String(i + 1),
+          storeId: 5,
+          title: p.title,
+          price,
+          oldPrice,
+          discountPercent,
+          imageUrl: p.image_url || null,
+          createdAt: Date.now()
+        };
+      })
+      .filter(Boolean);
+
+    console.log("✅ FINAL VOSTORG:", items.length);
 
     return items;
   } catch (e) {
