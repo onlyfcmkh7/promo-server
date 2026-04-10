@@ -1,54 +1,38 @@
-const puppeteer = require("puppeteer");
+const axios = require("axios");
 
-const VOSTORG_URL = "https://vostorg.zakaz.ua/ru/custom-categories/promotions/";
+const STORE_ID = "482320001";
 
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function scrapeVostorg() {
-  console.log("🚀 START VOSTORG DEBUG");
-
-  const browser = await puppeteer.launch({
-    headless: "new",
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage"
-    ]
-  });
+async function scrapeVostorg(query = "молоко") {
+  console.log("🚀 START VOSTORG API");
 
   try {
-    const page = await browser.newPage();
+    const url = `https://stores-api.zakaz.ua/stores/${STORE_ID}/products/search?q=${encodeURIComponent(query)}`;
 
-    await page.setUserAgent(
-      "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-    );
+    const res = await axios.get(url);
 
-    page.on("response", async (response) => {
-      try {
-        const req = response.request();
-        const type = req.resourceType();
-        const url = response.url();
-        const ct = response.headers()["content-type"] || "";
+    const products = res.data.results || [];
 
-        if (type === "xhr" || type === "fetch") {
-          console.log("XHR:", url);
-          console.log("TYPE:", ct);
-        }
-      } catch (_) {}
+    const items = products.map((p, i) => {
+      const price = p.price / 100;
+
+      return {
+        id: p.id || String(i),
+        storeId: 5,
+        title: p.title,
+        price,
+        oldPrice: null, // поки нема
+        discountPercent: null,
+        imageUrl: p.image_url || null,
+        createdAt: Date.now()
+      };
     });
 
-    await page.goto(VOSTORG_URL, {
-      waitUntil: "networkidle2",
-      timeout: 60000
-    });
+    console.log("✅ VOSTORG:", items.length);
 
-    await sleep(8000);
-
+    return items;
+  } catch (e) {
+    console.log("❌ VOSTORG ERROR:", e.message);
     return [];
-  } finally {
-    await browser.close();
   }
 }
 
