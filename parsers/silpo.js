@@ -30,40 +30,12 @@ function normalizeImageUrl(url) {
 function normalizeTitle(title) {
   return String(title || "")
     .replace(/\s+/g, " ")
-    .replace(/\s*-\s*\d+\s*$/, "")
     .trim();
 }
 
 function detectBrand(title) {
   const safeTitle = normalizeTitle(title);
-
-  const quoted = safeTitle.match(/[«"](.*?)[»"]/);
-  if (quoted && quoted[1]) return quoted[1].trim();
-
   return safeTitle.split(" ")[0] || "";
-}
-
-function isTrashTitle(title) {
-  const value = normalizeTitle(title).toLowerCase();
-
-  return [
-    "",
-    "header logo",
-    "logo",
-    "only_online",
-    "additional"
-  ].includes(value);
-}
-
-function getImageScore(url) {
-  const value = String(url || "").toLowerCase();
-
-  if (value.includes("/600x600/")) return 4;
-  if (value.includes("/300x300/")) return 3;
-  if (value.includes("/180x180/")) return 2;
-  if (value.includes("/90x90/")) return 1;
-
-  return 0;
 }
 
 async function autoScroll(page) {
@@ -109,7 +81,7 @@ async function scrapeSilpo() {
 
   const browser = await puppeteer.launch({
     headless: "new",
-    protocolTimeout: 120000, // ✅ FIX
+    protocolTimeout: 120000,
     args: [
       "--no-sandbox",
       "--disable-setuid-sandbox",
@@ -125,102 +97,80 @@ async function scrapeSilpo() {
     );
 
     await page.goto(SILPO_URL, {
-      waitUntil: "domcontentloaded", // ✅ FIX
+      waitUntil: "domcontentloaded",
       timeout: 60000
     });
 
-    await sleep(3000);
+    await sleep(4000);
     await acceptCookies(page);
     await autoScroll(page);
-    await sleep(2500);
+    await sleep(3000);
 
     const rawItems = await page.evaluate(() => {
-      try {
-        function txt(el) {
-          return (el?.innerText || el?.textContent || "")
-            .replace(/\s+/g, " ")
-            .trim();
-        }
-
-        const images = [...document.querySelectorAll("img[alt]")];
-        const result = [];
-
-        for (const img of images) {
-          const title = (img.getAttribute("alt") || "").trim();
-          if (!title || title.length < 5) continue;
-
-          const card = img.closest("div");
-          if (!card) continue;
-
-          const text = txt(card);
-
-          const match = text.match(
-            /(\d[\d\s.,]*)\s*грн[\s\S]*?(\d[\d\s.,]*)\s*грн[\s\S]*?-\s*(\d+)%/i
-          );
-
-          if (!match) continue;
-
-          const imageUrl =
-            img.currentSrc ||
-            img.src ||
-            img.getAttribute("src") ||
-            "";
-
-          result.push({
-            title,
-            priceText: match[1],
-            oldPriceText: match[2],
-            imageUrl
-          });
-        }
-
-        return result;
-      } catch (e) {
-        return [];
+      function txt(el) {
+        return (el?.innerText || "").replace(/\s+/g, " ").trim();
       }
+
+      const result = [];
+      const cards = document.querySelectorAll("div");
+
+      for (const card of cards) {
+        const text = txt(card);
+
+        if (!text.includes("грн") || !text.includes("%")) continue;
+
+        const match = text.match(
+          /(\d[\d\s.,]*)\s*грн[\s\S]*?(\d[\d\s.,]*)\s*грн[\s\S]*?-\s*(\d+)%/i
+        );
+
+        if (!match) continue;
+
+        const img = card.querySelector("img");
+
+        const imageUrl =
+          img?.currentSrc ||
+          img?.src ||
+          img?.getAttribute("src") ||
+          "";
+
+        const title =
+          img?.getAttribute("alt") ||
+          text.split("грн")[0] ||
+          "";
+
+        result.push({
+          title,
+          priceText: match[1],
+          oldPriceText: match[2],
+          imageUrl
+        });
+      }
+
+      return result;
     });
 
-    const parsedItems = rawItems
-      .map((item) => {
+    const items = rawItems
+      .map((item, i) => {
         const title = normalizeTitle(item.title);
         const price = parsePrice(item.priceText);
         const oldPrice = parsePrice(item.oldPriceText);
         const imageUrl = normalizeImageUrl(item.imageUrl);
 
-        if (!title || isTrashTitle(title)) return null;
-        if (!price || !oldPrice || !(oldPrice > price)) return null;
+        if (!title || !price || !oldPrice || !(oldPrice > price)) return null;
 
         return {
+          id: String(i + 1),
+          storeId: 2,
           title,
+          brand: detectBrand(title),
           price,
           oldPrice,
-          imageUrl
+          discountPercent: Math.round(((oldPrice - price) / oldPrice) * 100),
+          imageUrl,
+          createdAt: Date.now()
         };
       })
       .filter(Boolean);
-
-    const deduped = new Map();
-
-    for (const item of parsedItems) {
-      const key = `${item.title}|${item.price}|${item.oldPrice}`;
-      const existing = deduped.get(key);
-
-      if (!existing || getImageScore(item.imageUrl) > getImageScore(existing.imageUrl)) {
-        deduped.set(key, item);
-      }
-    }
-
-    const items = [...deduped.values()].map((item, i) => ({
-      id: String(i + 1),
-      storeId: 2,
-      title: item.title,
-      brand: detectBrand(item.title),
-      price: item.price,
-      oldPrice: item.oldPrice,
-      discountPercent: Math.round(((item.oldPrice - item.price) / item.oldPrice) * 100),
-      imageUrl: item.imageUrl,
-      createdAt: Date.now()
-    }));
 
     console.log("✅ FINAL SILPO:", items.length);
 
