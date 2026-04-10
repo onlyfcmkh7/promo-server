@@ -1,7 +1,8 @@
-const axios = require("axios");
+const puppeteer = require("puppeteer");
+
+const SILPO_URL = "https://silpo.ua/search";
 
 const STORE_NUMERIC_ID = 2;
-const BASE_URL = "https://silpo.ua/search";
 const LIMIT_PER_CATEGORY = 10;
 
 const CATEGORY_ORDER = [
@@ -55,7 +56,9 @@ const CATEGORY_REGEX = {
   strong_alcohol: /\b(горілка|віскі|коньяк|ром|джин|текіла|бренді|лікер|настоянка|бурбон)\b/i
 };
 
-console.log("SILPO FILE LOADED");
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function parsePrice(value) {
   if (value === null || value === undefined || value === "") {
@@ -140,17 +143,6 @@ function normalizeImageUrl(url) {
   return value;
 }
 
-function decodeHtmlEntities(value) {
-  return String(value || "")
-    .replace(/&quot;/g, '"')
-    .replace(/&#34;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&apos;/g, "'")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">");
-}
-
 function detectBrand(title, item = {}) {
   const directBrand =
     item.brandTitle ||
@@ -187,97 +179,6 @@ function calculateDiscountPercent(price, oldPrice) {
   }
 
   return Math.round(((oldPrice - price) / oldPrice) * 100);
-}
-
-function extractServerAppState(html) {
-  const match = html.match(
-    /<script[^>]*id="serverApp-state"[^>]*>([\s\S]*?)<\/script>/i
-  );
-
-  if (!match || !match[1]) {
-    console.log("serverApp-state script NOT FOUND");
-    return null;
-  }
-
-  const rawJson = decodeHtmlEntities(match[1].trim());
-
-  console.log("serverApp-state RAW LENGTH:", rawJson.length);
-  console.log("serverApp-state RAW START:", rawJson.slice(0, 300));
-
-  try {
-    return JSON.parse(rawJson);
-  } catch (error) {
-    console.log("JSON parse failed:", error.message);
-    return null;
-  }
-}
-
-function collectItemsFromNode(node, collector) {
-  if (!node) {
-    return;
-  }
-
-  if (Array.isArray(node)) {
-    for (const item of node) {
-      collectItemsFromNode(item, collector);
-    }
-    return;
-  }
-
-  if (typeof node !== "object") {
-    return;
-  }
-
-  const title = node.title || node.name;
-  const hasPrice =
-    node.price !== undefined ||
-    node.displayPrice !== undefined ||
-    node.currentPrice !== undefined;
-
-  if (title && hasPrice) {
-    collector.push(node);
-  }
-
-  if (Array.isArray(node.items)) {
-    for (const item of node.items) {
-      if (item && typeof item === "object") {
-        collector.push(item);
-      }
-    }
-  }
-
-  for (const value of Object.values(node)) {
-    collectItemsFromNode(value, collector);
-  }
-}
-
-function extractItemsFromState(state) {
-  const collected = [];
-  collectItemsFromNode(state, collected);
-
-  const unique = new Map();
-
-  for (const item of collected) {
-    const rawId =
-      item.id ||
-      item.offerId ||
-      item.externalProductId ||
-      item.slug ||
-      item.title ||
-      item.name;
-
-    if (!rawId) {
-      continue;
-    }
-
-    const key = String(rawId).trim();
-
-    if (!unique.has(key)) {
-      unique.set(key, item);
-    }
-  }
-
-  return Array.from(unique.values());
 }
 
 function buildProductRecord(item, forcedCategory) {
@@ -324,6 +225,7 @@ function buildProductRecord(item, forcedCategory) {
       item.image ||
       item.imageUrl ||
       item.photo ||
+      item.mainImage ||
       ""
   );
 
@@ -333,6 +235,7 @@ function buildProductRecord(item, forcedCategory) {
         item.offerId ||
         item.externalProductId ||
         item.slug ||
+        item.article ||
         title
     ).trim(),
     storeId: STORE_NUMERIC_ID,
@@ -347,40 +250,144 @@ function buildProductRecord(item, forcedCategory) {
   };
 }
 
-async function searchProducts(query) {
-  try {
-    console.log("SILPO QUERY:", query);
+async function acceptCookies(page) {
+  const candidates = [
+    "button",
+    "[role='button']",
+    "a"
+  ];
 
-    const response = await axios.get(BASE_URL, {
-      params: { find: query },
-      timeout: 30000,
-      headers: {
-        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
-        "Accept-Language": "uk-UA,uk;q=0.9,en;q=0.8"
+  for (const selector of candidates) {
+    const elements = await page.$$(selector);
+
+    for (const element of elements) {
+      try {
+        const text = await page.evaluate(
+          (node) => (node.innerText || node.textContent || "").trim(),
+          element
+        );
+
+        if (/прийняти|accept|ok|добре|зрозуміло/i.test(text)) {
+          await element.click({ delay: 50 }).catch(() => {});
+          await sleep(1000);
+          return;
+        }
+      } catch (_) {}
+    }
+  }
+}
+
+async function extractItemsFromPage(page) {
+  return page.evaluate(() => {
+    function readStateScript() {
+      const script = document.querySelector('#serverApp-state');
+      if (!script) {
+        return null;
       }
-    });
 
-    const html = String(response.data || "");
+      const raw = script.textContent || script.innerHTML || "";
+      if (!raw.trim()) {
+        return null;
+      }
 
-    console.log("HTML LENGTH:", html.length);
-    console.log("HAS serverApp-state:", html.includes('id="serverApp-state"'));
-
-    if (!html) {
-      return [];
+      try {
+        return JSON.parse(raw);
+      } catch (_) {
+        return null;
+      }
     }
 
-    const state = extractServerAppState(html);
+    function collectItems(node, collector) {
+      if (!node) {
+        return;
+      }
 
-    console.log("STATE FOUND:", !!state);
+      if (Array.isArray(node)) {
+        for (const item of node) {
+          collectItems(item, collector);
+        }
+        return;
+      }
 
+      if (typeof node !== "object") {
+        return;
+      }
+
+      const title = node.title || node.name;
+      const hasPrice =
+        node.price !== undefined ||
+        node.displayPrice !== undefined ||
+        node.currentPrice !== undefined;
+
+      if (title && hasPrice) {
+        collector.push(node);
+      }
+
+      if (Array.isArray(node.items)) {
+        for (const item of node.items) {
+          if (item && typeof item === "object") {
+            collector.push(item);
+          }
+        }
+      }
+
+      for (const value of Object.values(node)) {
+        collectItems(value, collector);
+      }
+    }
+
+    const state = readStateScript();
     if (!state) {
       return [];
     }
 
-    const items = extractItemsFromState(state);
+    const collected = [];
+    collectItems(state, collected);
 
-    console.log("RAW ITEMS:", items.length);
+    const unique = new Map();
+
+    for (const item of collected) {
+      const key = String(
+        item.id ||
+          item.offerId ||
+          item.externalProductId ||
+          item.slug ||
+          item.title ||
+          item.name ||
+          Math.random()
+      );
+
+      if (!unique.has(key)) {
+        unique.set(key, item);
+      }
+    }
+
+    return Array.from(unique.values());
+  });
+}
+
+async function searchProducts(page, query) {
+  try {
+    const url = `${SILPO_URL}?find=${encodeURIComponent(query)}`;
+
+    console.log("SILPO QUERY:", query);
+
+    await page.goto(url, {
+      waitUntil: "domcontentloaded",
+      timeout: 60000
+    });
+
+    await sleep(2500);
+    await acceptCookies(page);
+    await sleep(1500);
+
+    await page.waitForSelector("#serverApp-state", {
+      timeout: 15000
+    }).catch(() => {});
+
+    const items = await extractItemsFromPage(page);
+
+    console.log(`QUERY "${query}" RAW PRODUCTS:`, items.length);
 
     return items;
   } catch (error) {
@@ -389,7 +396,7 @@ async function searchProducts(query) {
   }
 }
 
-async function getCategoryProducts(category) {
+async function getCategoryProducts(page, category) {
   const queries = CATEGORY_QUERIES[category] || [category];
   const uniqueProducts = new Map();
 
@@ -400,9 +407,7 @@ async function getCategoryProducts(category) {
       break;
     }
 
-    const rawProducts = await searchProducts(query);
-
-    console.log(`QUERY "${query}" RAW PRODUCTS:`, rawProducts.length);
+    const rawProducts = await searchProducts(page, query);
 
     for (const rawProduct of rawProducts) {
       const builtProduct = buildProductRecord(rawProduct, category);
@@ -411,9 +416,9 @@ async function getCategoryProducts(category) {
         continue;
       }
 
-      const detectedCategory = detectCategory(builtProduct.title);
+      const detected = detectCategory(builtProduct.title);
 
-      if (detectedCategory && detectedCategory !== category) {
+      if (detected && detected !== category) {
         continue;
       }
 
@@ -439,12 +444,32 @@ async function getCategoryProducts(category) {
 async function scrapeSilpo() {
   console.log("scrapeSilpo started");
 
+  const browser = await puppeteer.launch({
+    headless: "new",
+    protocolTimeout: 120000,
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage"
+    ]
+  });
+
   try {
+    const page = await browser.newPage();
+
+    await page.setUserAgent(
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36"
+    );
+
+    await page.setExtraHTTPHeaders({
+      "Accept-Language": "uk-UA,uk;q=0.9,en;q=0.8"
+    });
+
     const allProducts = [];
     const globalUnique = new Map();
 
     for (const category of CATEGORY_ORDER) {
-      const categoryProducts = await getCategoryProducts(category);
+      const categoryProducts = await getCategoryProducts(page, category);
 
       for (const product of categoryProducts) {
         const uniqueKey = `${product.category}|${product.title.toLowerCase()}|${product.price}|${product.oldPrice}`;
@@ -465,6 +490,8 @@ async function scrapeSilpo() {
   } catch (error) {
     console.error("SILPO SCRAPE ERROR:", error.message);
     return [];
+  } finally {
+    await browser.close();
   }
 }
 
