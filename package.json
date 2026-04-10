@@ -1,7 +1,7 @@
 {
   "name": "promo-server",
   "version": "1.0.0",
-  "description": "ATB promotions scraper (real data, puppeteer)",
+  "description": "Promotions scraper",
   "main": "index.js",
   "type": "commonjs",
   "scripts": {
@@ -11,6 +11,7 @@
     "node": ">=18"
   },
   "dependencies": {
+    "axios": "^1.6.8",
     "cors": "^2.8.5",
     "express": "^4.21.2",
     "puppeteer": "^24.7.1"
