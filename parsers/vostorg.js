@@ -11,13 +11,13 @@ async function scrapeVostorg() {
   console.log("🚀 START VOSTORG PROMOTIONS");
 
   try {
-    const url = `https://stores-api.zakaz.ua/stores/${STORE_ID}/custom-categories/promotions/products/`;
+    const url = `https://stores-api.zakaz.ua/stores/${STORE_ID}/custom-categories/promotions/products/?page=1&page_size=100`;
 
     const res = await axios.get(url);
 
     const products = res.data.results || [];
 
-    console.log("🔍 FOUND RAW:", products.length);
+    console.log("🔍 RAW:", products.length);
 
     const items = products
       .map((p, i) => {
