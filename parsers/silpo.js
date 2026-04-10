@@ -40,7 +40,7 @@ async function autoScroll(page) {
   await page.evaluate(async () => {
     await new Promise((resolve) => {
       let total = 0;
-      const distance = 500;
+      const distance = 700;
 
       const timer = setInterval(() => {
         window.scrollBy(0, distance);
@@ -50,7 +50,7 @@ async function autoScroll(page) {
           clearInterval(timer);
           resolve();
         }
-      }, 200);
+      }, 250);
     });
   });
 }
@@ -103,7 +103,7 @@ async function scrapeSilpo() {
     await sleep(3000);
     await acceptCookies(page);
     await autoScroll(page);
-    await sleep(2500);
+    await sleep(3000);
 
     const rawItems = await page.evaluate(() => {
       function txt(el) {
@@ -138,34 +138,18 @@ async function scrapeSilpo() {
         ].includes(value);
       }
 
-      function isBadTitle(title) {
+      function isLikelyProductTitle(title) {
         const value = normalizeTitle(title);
-        const lower = value.toLowerCase();
 
-        if (!value) return true;
-        if (value.length < 5) return true;
-        if (!/[а-яіїєґa-z0-9]/i.test(value)) return true;
+        if (!value) return false;
+        if (value.length < 5) return false;
+        if (isBadAlt(value)) return false;
+        if (!/[а-яіїєґa-z0-9]/i.test(value)) return false;
 
-        if (isBadAlt(lower)) return true;
-
-        if (
-          [
-            "rose mojito",
-            "rose spritz",
-            "redberry spritz"
-          ].includes(lower)
-        ) {
-          return true;
-        }
-
-        return false;
+        return true;
       }
 
-      function getProductImage(card) {
-        const imgs = [...card.querySelectorAll("img[alt]")];
-        const img = imgs.find((item) => !isBadAlt(item.getAttribute("alt")));
-        if (!img) return "";
-
+      function getImageUrl(img) {
         return (
           img.currentSrc ||
           img.src ||
@@ -176,23 +160,18 @@ async function scrapeSilpo() {
         );
       }
 
-      function getProductTitle(card) {
-        const imgs = [...card.querySelectorAll("img[alt]")];
-        const img = imgs.find((item) => {
-          const alt = item.getAttribute("alt");
-          return !isBadAlt(alt) && !isBadTitle(alt);
-        });
-
-        return img ? normalizeTitle(img.getAttribute("alt")) : "";
-      }
-
-      function findCard(el) {
-        let current = el;
+      function findCardForImage(img, title) {
+        let current = img.parentElement;
 
         while (current) {
           const text = txt(current);
 
-          if (/грн/i.test(text) && /-\s*\d+%/i.test(text)) {
+          if (
+            text &&
+            text.includes(title) &&
+            /(\d[\d\s.,]*)\s*грн/i.test(text) &&
+            /-\s*\d+%/i.test(text)
+          ) {
             return current;
           }
 
@@ -202,21 +181,26 @@ async function scrapeSilpo() {
         return null;
       }
 
-      const links = [...document.querySelectorAll("a[href]")];
+      const images = [...document.querySelectorAll("img[alt]")];
       const result = [];
       const seen = new Set();
 
-      for (const link of links) {
-        const card = findCard(link);
+      for (const img of images) {
+        const rawTitle = img.getAttribute("alt");
+        const title = normalizeTitle(rawTitle);
+
+        if (!isLikelyProductTitle(title)) continue;
+
+        const imageUrl = getImageUrl(img);
+        if (!imageUrl) continue;
+        if (/content\.silpo\.ua\/hermes\//i.test(imageUrl)) continue;
+        if (/Logotype\.svg/i.test(imageUrl)) continue;
+
+        const card = findCardForImage(img, title);
         if (!card) continue;
 
-        const title = getProductTitle(card);
-        if (isBadTitle(title)) continue;
-
-        const imageUrl = getProductImage(card);
-        if (!imageUrl) continue;
-
         const text = txt(card);
+
         const match = text.match(
           /(\d[\d\s.,]*)\s*грн[\s\S]*?(\d[\d\s.,]*)\s*грн[\s\S]*?-\s*(\d+)%/i
         );
@@ -242,7 +226,7 @@ async function scrapeSilpo() {
     });
 
     console.log("🔍 FOUND SILPO RAW:", rawItems.length);
-    console.log("🔍 SAMPLE SILPO RAW:", rawItems.slice(0, 5));
+    console.log("🔍 SAMPLE SILPO RAW:", rawItems.slice(0, 10));
 
     const items = rawItems
       .map((item, i) => {
