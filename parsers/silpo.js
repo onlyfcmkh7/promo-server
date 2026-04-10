@@ -38,20 +38,33 @@ const CATEGORY_REGEX = {
   strong_alcohol: /\b(горілка|віскі|коньяк|ром|джин|текіла|бренді|лікер|настоянка|бурбон)\b/i
 };
 
+const BAD_TITLES = new Set([
+  "",
+  "facebook",
+  "instagram",
+  "telegram",
+  "viber",
+  "facebook bot",
+  "header logo",
+  "silpo logo",
+  "logo",
+  "cinotyzhyky",
+  "katalogh-asortyment",
+  "цінотижики",
+  "каталог асортимент",
+  "melkoopt",
+  "only_online"
+]);
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function parsePrice(value) {
-  if (!value && value !== 0) {
-    return null;
-  }
+  if (!value && value !== 0) return null;
 
   if (typeof value === "number") {
-    if (!Number.isFinite(value)) {
-      return null;
-    }
-    return Number(value.toFixed(2));
+    return Number.isFinite(value) ? Number(value.toFixed(2)) : null;
   }
 
   const cleaned = String(value)
@@ -59,9 +72,7 @@ function parsePrice(value) {
     .replace(",", ".")
     .replace(/[^\d.]/g, "");
 
-  if (!cleaned) {
-    return null;
-  }
+  if (!cleaned) return null;
 
   const parsed = Number(cleaned);
   return Number.isFinite(parsed) ? Number(parsed.toFixed(2)) : null;
@@ -76,37 +87,37 @@ function normalizeTitle(title) {
     .trim();
 }
 
-function isTrashTitle(title) {
-  const value = normalizeTitle(title).toLowerCase();
+function isTechSlug(value) {
+  const v = normalizeTitle(value).toLowerCase();
 
-  if (!value) {
+  if (!v) return true;
+  if (BAD_TITLES.has(v)) return true;
+  if (v.length < 8) return true;
+
+  if (/^[a-z0-9_-]+$/.test(v)) {
     return true;
   }
 
-  if (value.length < 8) {
+  if (/facebook|instagram|telegram|viber|logo|цінотижики|каталог|only_online|melkoopt/i.test(v)) {
     return true;
   }
 
-  const bannedExact = new Set([
-    "facebook",
-    "instagram",
-    "telegram",
-    "viber",
-    "facebook bot",
-    "header logo",
-    "silpo logo",
-    "logo",
-    "cinotyzhyky",
-    "katalogh-asortyment",
-    "цінотижики",
-    "каталог асортимент"
-  ]);
+  return false;
+}
 
-  if (bannedExact.has(value)) {
-    return true;
-  }
+function isReasonableProductTitle(value) {
+  const v = normalizeTitle(value);
 
-  return /facebook|instagram|telegram|viber|logo|цінотижики|каталог/i.test(value);
+  if (!v) return false;
+  if (isTechSlug(v)) return false;
+
+  const hasLetters = /[a-zа-яіїєґ]/i.test(v);
+  if (!hasLetters) return false;
+
+  const words = v.split(/\s+/).filter(Boolean);
+  if (words.length < 2) return false;
+
+  return true;
 }
 
 function detectCategory(title) {
@@ -123,23 +134,13 @@ function detectCategory(title) {
 }
 
 function normalizeImageUrl(url) {
-  if (!url) {
-    return "";
-  }
+  if (!url) return "";
 
   const value = String(url).trim();
+  if (!value) return "";
 
-  if (!value) {
-    return "";
-  }
-
-  if (value.startsWith("//")) {
-    return `https:${value}`;
-  }
-
-  if (value.startsWith("/")) {
-    return `https://silpo.ua${value}`;
-  }
+  if (value.startsWith("//")) return `https:${value}`;
+  if (value.startsWith("/")) return `https://silpo.ua${value}`;
 
   return value;
 }
@@ -241,9 +242,7 @@ async function extractOfferItems(page) {
         .replace(",", ".")
         .replace(/[^\d.]/g, "");
 
-      if (!cleaned) {
-        return null;
-      }
+      if (!cleaned) return null;
 
       const parsed = Number(cleaned);
       return Number.isFinite(parsed) ? Number(parsed.toFixed(2)) : null;
@@ -260,19 +259,67 @@ async function extractOfferItems(page) {
       );
     }
 
-    function looksLikeProductTitle(value) {
-      const title = normalize(value);
+    function isTechSlug(value) {
+      const v = normalize(value).toLowerCase();
 
-      if (!title || title.length < 8) return false;
-      if (/facebook|instagram|telegram|viber|logo|цінотижики|каталог/i.test(title)) {
-        return false;
+      if (!v) return true;
+      if (v.length < 8) return true;
+      if (/^[a-z0-9_-]+$/.test(v)) return true;
+      if (/facebook|instagram|telegram|viber|logo|цінотижики|каталог|only_online|melkoopt/i.test(v)) {
+        return true;
       }
 
-      return true;
+      return false;
+    }
+
+    function isReasonableProductTitle(value) {
+      const v = normalize(value);
+      if (!v) return false;
+      if (isTechSlug(v)) return false;
+      if (!/[a-zа-яіїєґ]/i.test(v)) return false;
+
+      const words = v.split(/\s+/).filter(Boolean);
+      return words.length >= 2;
     }
 
     function hasMoney(value) {
       return /\d[\d\s.,]{0,20}\s*(грн|₴)/i.test(String(value || ""));
+    }
+
+    function getPriceLines(card) {
+      const nodes = Array.from(card.querySelectorAll("div, span, p, a, strong, b"));
+      const lines = [];
+
+      for (const node of nodes) {
+        const value = text(node);
+
+        if (!value) continue;
+        if (value.length > 40) continue;
+        if (!hasMoney(value)) continue;
+
+        lines.push(normalize(value));
+      }
+
+      const fullText = text(card);
+      const matches = fullText.match(/\d[\d\s.,]{0,20}\s*(грн|₴)/gi) || [];
+      for (const m of matches) {
+        lines.push(normalize(m));
+      }
+
+      return Array.from(new Set(lines));
+    }
+
+    function extractTitle(card) {
+      const textNodes = Array.from(card.querySelectorAll("div, span, p, a, h2, h3, h4"))
+        .map((el) => normalize(text(el)))
+        .filter((value) => {
+          if (!isReasonableProductTitle(value)) return false;
+          if (hasMoney(value)) return false;
+          return true;
+        })
+        .sort((a, b) => a.length - b.length);
+
+      return textNodes[0] || "";
     }
 
     function isProbablyCard(node) {
@@ -281,61 +328,13 @@ async function extractOfferItems(page) {
       const fullText = text(node);
       if (!hasMoney(fullText)) return false;
 
-      const img = node.querySelector("img[alt], img[src]");
-      if (!img) return false;
+      const title = extractTitle(node);
+      if (!title) return false;
 
-      const titleFromAlt = normalize(img.getAttribute("alt"));
-      if (titleFromAlt && looksLikeProductTitle(titleFromAlt)) {
-        return true;
-      }
+      const priceLines = getPriceLines(node);
+      if (priceLines.length === 0 || priceLines.length > 4) return false;
 
-      const candidateTextNodes = Array.from(node.querySelectorAll("div, span, p, a, h2, h3, h4"))
-        .map((el) => text(el))
-        .filter(Boolean);
-
-      return candidateTextNodes.some((value) => looksLikeProductTitle(value));
-    }
-
-    function extractTitle(card) {
-      const imgAlt = normalize(card.querySelector("img[alt]")?.getAttribute("alt"));
-      if (looksLikeProductTitle(imgAlt)) {
-        return imgAlt;
-      }
-
-      const textCandidates = Array.from(card.querySelectorAll("div, span, p, a, h2, h3, h4"))
-        .map((el) => normalize(text(el)))
-        .filter((value) => looksLikeProductTitle(value))
-        .sort((a, b) => b.length - a.length);
-
-      return textCandidates[0] || "";
-    }
-
-    function extractPriceCandidates(card) {
-      const candidates = new Set();
-
-      const fullText = text(card);
-      const fullMatches = fullText.match(/\d[\d\s.,]{0,20}\s*(грн|₴)/gi) || [];
-      fullMatches.forEach((value) => candidates.add(normalize(value)));
-
-      const nodes = Array.from(card.querySelectorAll("div, span, p, a, strong, b"));
-      for (const node of nodes) {
-        const value = text(node);
-
-        if (!value || value.length > 40) {
-          continue;
-        }
-
-        if (/\d[\d\s.,]{0,20}\s*(грн|₴)/i.test(value)) {
-          candidates.add(normalize(value));
-        }
-      }
-
-      return Array.from(candidates)
-        .map((raw) => ({
-          raw,
-          value: parseLocalPrice(raw)
-        }))
-        .filter((item) => item.value !== null && item.value > 0);
+      return true;
     }
 
     function extractDiscountPercent(card) {
@@ -344,53 +343,35 @@ async function extractOfferItems(page) {
       return match ? Number(match[1]) : null;
     }
 
-    const allNodes = Array.from(document.querySelectorAll("div, article, section, li"));
-    const rawCards = allNodes.filter(isProbablyCard);
+    const nodes = Array.from(document.querySelectorAll("article, li, div, section"));
+    const rawCards = nodes.filter(isProbablyCard);
 
     const result = [];
-    const seenCardKeys = new Set();
+    const seen = new Set();
 
     for (const card of rawCards) {
       const title = extractTitle(card);
+      if (!title) continue;
 
-      if (!looksLikeProductTitle(title)) {
-        continue;
-      }
-
-      const imageNode = card.querySelector("img[alt], img[src]");
+      const imageNode = card.querySelector("img[src], img[data-src]");
       const imageUrl = getImageUrl(imageNode);
 
-      if (!/images\.silpo\.ua|content\.silpo\.ua|silpo\.ua/i.test(imageUrl)) {
-        continue;
-      }
+      const priceLines = getPriceLines(card);
+      const numericPrices = priceLines
+        .map(parseLocalPrice)
+        .filter((v) => v !== null && v > 0);
 
-      const priceCandidates = extractPriceCandidates(card);
+      const uniquePrices = Array.from(new Set(numericPrices)).sort((a, b) => a - b);
 
-      if (priceCandidates.length === 0) {
-        continue;
-      }
+      if (uniquePrices.length === 0) continue;
+      if (uniquePrices.length > 3) continue;
 
-      const uniquePrices = Array.from(
-        new Set(priceCandidates.map((item) => item.value))
-      ).sort((a, b) => a - b);
-
-      if (uniquePrices.length > 3) {
-        continue;
-      }
-
-      const price = uniquePrices[0] || null;
+      const price = uniquePrices[0];
       const oldPrice = uniquePrices.length > 1 ? uniquePrices[uniquePrices.length - 1] : price;
 
-      if (!price || price <= 0) {
-        continue;
-      }
-
       const key = `${title.toLowerCase()}|${price}|${oldPrice}`;
-      if (seenCardKeys.has(key)) {
-        continue;
-      }
-
-      seenCardKeys.add(key);
+      if (seen.has(key)) continue;
+      seen.add(key);
 
       result.push({
         title,
@@ -408,7 +389,7 @@ async function extractOfferItems(page) {
 function mapOfferItem(rawItem, index) {
   const title = normalizeTitle(rawItem.title);
 
-  if (!title || isTrashTitle(title)) {
+  if (!title || !isReasonableProductTitle(title)) {
     return null;
   }
 
@@ -424,10 +405,6 @@ function mapOfferItem(rawItem, index) {
 
   if (oldPrice < price) {
     oldPrice = price;
-  }
-
-  if (title.length < 8) {
-    return null;
   }
 
   return {
@@ -512,12 +489,9 @@ async function scrapeSilpo() {
 
     rawItems.forEach((rawItem, index) => {
       const item = mapOfferItem(rawItem, index);
-      if (!item) {
-        return;
-      }
+      if (!item) return;
 
       const key = `${item.title.toLowerCase()}|${item.price}|${item.oldPrice}`;
-
       if (!deduped.has(key)) {
         deduped.set(key, item);
       }
