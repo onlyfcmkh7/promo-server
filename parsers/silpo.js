@@ -119,8 +119,8 @@ async function scrapeSilpo() {
           .trim();
       }
 
-      function isBadAlt(alt) {
-        const value = String(alt || "").trim().toLowerCase();
+      function isBadAlt(value) {
+        const alt = String(value || "").trim().toLowerCase();
 
         return [
           "",
@@ -135,21 +135,10 @@ async function scrapeSilpo() {
           "katalogh-asortyment",
           "velykden",
           "melkoopt"
-        ].includes(value);
+        ].includes(alt);
       }
 
-      function isLikelyProductTitle(title) {
-        const value = normalizeTitle(title);
-
-        if (!value) return false;
-        if (value.length < 5) return false;
-        if (isBadAlt(value)) return false;
-        if (!/[а-яіїєґa-z0-9]/i.test(value)) return false;
-
-        return true;
-      }
-
-      function getImageUrl(img) {
+      function getImgUrl(img) {
         return (
           img.currentSrc ||
           img.src ||
@@ -160,16 +149,29 @@ async function scrapeSilpo() {
         );
       }
 
-      function findCardForImage(img, title) {
-        let current = img.parentElement;
+      function isProductImage(url) {
+        const value = String(url || "").trim().toLowerCase();
+
+        if (!value) return false;
+        if (value.includes("content.silpo.ua/hermes/")) return false;
+        if (value.includes("logotype.svg")) return false;
+        if (value.includes(".svg")) return false;
+
+        return (
+          value.includes("images.silpo.ua") &&
+          (value.includes("/products/") || value.includes("/v2/products/"))
+        );
+      }
+
+      function findPromoCard(startNode) {
+        let current = startNode;
 
         while (current) {
           const text = txt(current);
 
           if (
-            text &&
-            text.includes(title) &&
             /(\d[\d\s.,]*)\s*грн/i.test(text) &&
+            /(\d[\d\s.,]*)\s*грн[\s\S]*?(\d[\d\s.,]*)\s*грн/i.test(text) &&
             /-\s*\d+%/i.test(text)
           ) {
             return current;
@@ -186,21 +188,18 @@ async function scrapeSilpo() {
       const seen = new Set();
 
       for (const img of images) {
-        const rawTitle = img.getAttribute("alt");
-        const title = normalizeTitle(rawTitle);
+        const title = normalizeTitle(img.getAttribute("alt"));
+        const imageUrl = getImgUrl(img);
 
-        if (!isLikelyProductTitle(title)) continue;
+        if (!title || title.length < 5) continue;
+        if (isBadAlt(title)) continue;
+        if (!/[а-яіїєґa-z0-9]/i.test(title)) continue;
+        if (!isProductImage(imageUrl)) continue;
 
-        const imageUrl = getImageUrl(img);
-        if (!imageUrl) continue;
-        if (/content\.silpo\.ua\/hermes\//i.test(imageUrl)) continue;
-        if (/Logotype\.svg/i.test(imageUrl)) continue;
-
-        const card = findCardForImage(img, title);
+        const card = findPromoCard(img);
         if (!card) continue;
 
         const text = txt(card);
-
         const match = text.match(
           /(\d[\d\s.,]*)\s*грн[\s\S]*?(\d[\d\s.,]*)\s*грн[\s\S]*?-\s*(\d+)%/i
         );
