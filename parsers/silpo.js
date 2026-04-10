@@ -76,6 +76,26 @@ function normalizeTitle(title) {
     .trim();
 }
 
+function isTrashTitle(title) {
+  const value = normalizeTitle(title).toLowerCase();
+
+  return [
+    "",
+    "facebook",
+    "instagram",
+    "telegram",
+    "viber",
+    "facebook bot",
+    "header logo",
+    "silpo logo",
+    "logo",
+    "cinotyzhyky",
+    "katalogh-asortyment",
+    "цінотижики",
+    "каталог асортимент"
+  ].includes(value);
+}
+
 function detectCategory(title) {
   const normalized = normalizeTitle(title).toLowerCase();
 
@@ -209,19 +229,28 @@ async function extractOfferItems(page) {
       );
     }
 
+    function hasTwoPricesOrDiscount(value) {
+      return /-\s*\d+%/i.test(value) || /акція|цінотижики|ціна тижня|вигода/i.test(value);
+    }
+
+    function hasMoney(value) {
+      return /грн/i.test(value) || /\d[\d\s.,]*\s*(грн|₴)/i.test(value);
+    }
+
+    function looksLikeProductTitle(value) {
+      const title = String(value || "").trim();
+      if (!title || title.length < 8) return false;
+      if (/facebook|instagram|telegram|viber|logo/i.test(title)) return false;
+      return true;
+    }
+
     function closestCard(node) {
       let current = node;
 
       while (current) {
         const value = text(current);
 
-        if (
-          /грн/i.test(value) &&
-          (
-            /-\s*\d+%/i.test(value) ||
-            /акція|ціна тижня|вигода/i.test(value)
-          )
-        ) {
+        if (hasMoney(value) && hasTwoPricesOrDiscount(value)) {
           return current;
         }
 
@@ -235,14 +264,14 @@ async function extractOfferItems(page) {
     const result = [];
 
     for (const image of images) {
-      const title = text({ innerText: image.getAttribute("alt") || "" });
+      const title = String(image.getAttribute("alt") || "").replace(/\s+/g, " ").trim();
       const imageUrl = getImageUrl(image);
 
-      if (!title || title.length < 4) {
+      if (!looksLikeProductTitle(title)) {
         continue;
       }
 
-      if (!/images\.silpo\.ua|silpo\.ua/i.test(imageUrl)) {
+      if (!/images\.silpo\.ua|content\.silpo\.ua|silpo\.ua/i.test(imageUrl)) {
         continue;
       }
 
@@ -252,16 +281,23 @@ async function extractOfferItems(page) {
       }
 
       const cardText = text(card);
+      if (!hasMoney(cardText)) {
+        continue;
+      }
 
-      const prices = cardText.match(/\d[\d\s.,]*/g) || [];
-      const parsedPrices = prices
+      const discountMatch = cardText.match(/-\s*(\d+)%/i);
+
+      const priceMatches = Array.from(
+        cardText.matchAll(/(\d[\d\s.,]{0,20})\s*(?:грн|₴)/gi)
+      ).map((match) => match[1]);
+
+      const parsedPrices = priceMatches
         .map((item) => {
           const value = Number(
             String(item)
               .replace(/\s+/g, "")
               .replace(",", ".")
           );
-
           return Number.isFinite(value) ? value : null;
         })
         .filter((item) => item !== null);
@@ -269,8 +305,6 @@ async function extractOfferItems(page) {
       if (parsedPrices.length === 0) {
         continue;
       }
-
-      const discountMatch = cardText.match(/-\s*(\d+)%/i);
 
       let price = parsedPrices[0] || null;
       let oldPrice = parsedPrices[1] || null;
@@ -296,7 +330,8 @@ async function extractOfferItems(page) {
 
 function mapOfferItem(rawItem, index) {
   const title = normalizeTitle(rawItem.title);
-  if (!title) {
+
+  if (!title || isTrashTitle(title)) {
     return null;
   }
 
@@ -314,10 +349,9 @@ function mapOfferItem(rawItem, index) {
     oldPrice = price;
   }
 
-  const discountPercent =
-    rawItem.discountPercent && rawItem.discountPercent > 0
-      ? rawItem.discountPercent
-      : calculateDiscountPercent(price, oldPrice);
+  if (title.length < 8) {
+    return null;
+  }
 
   return {
     id: String(index + 1),
@@ -327,7 +361,10 @@ function mapOfferItem(rawItem, index) {
     title,
     price,
     oldPrice,
-    discountPercent,
+    discountPercent:
+      rawItem.discountPercent && rawItem.discountPercent > 0
+        ? rawItem.discountPercent
+        : calculateDiscountPercent(price, oldPrice),
     imageUrl: normalizeImageUrl(rawItem.imageUrl),
     createdAt: Date.now()
   };
