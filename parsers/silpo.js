@@ -28,23 +28,20 @@ async function acceptCookies(page) {
 
   for (const btn of buttons) {
     try {
-      const text = await page.evaluate(
-        (el) => (el.innerText || "").trim(),
-        btn
-      );
+      const text = await page.evaluate(el => (el.innerText || "").trim(), btn);
 
       if (/прийняти|accept|ok|добре|зрозуміло/i.test(text)) {
         await btn.click().catch(() => {});
         await sleep(1000);
         return;
       }
-    } catch (_) {}
+    } catch {}
   }
 }
 
 async function autoScroll(page) {
   await page.evaluate(async () => {
-    await new Promise((resolve) => {
+    await new Promise(resolve => {
       let total = 0;
       const step = 800;
       let idle = 0;
@@ -62,25 +59,13 @@ async function autoScroll(page) {
           lastHeight = currentHeight;
         }
 
-        if (idle >= 4 || total > currentHeight + 1600) {
+        if (idle >= 5 || total > currentHeight + 2000) {
           clearInterval(timer);
           resolve();
         }
-      }, 450);
+      }, 500);
     });
   });
-}
-
-async function waitForPrices(page) {
-  try {
-    await page.waitForFunction(
-      () => /грн|₴/i.test(document.body?.innerText || ""),
-      { timeout: 20000 }
-    );
-    return true;
-  } catch (_) {
-    return false;
-  }
 }
 
 async function scrapeSilpo() {
@@ -88,12 +73,7 @@ async function scrapeSilpo() {
 
   const browser = await puppeteer.launch({
     headless: "new",
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-      "--disable-gpu"
-    ]
+    args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"]
   });
 
   try {
@@ -108,48 +88,15 @@ async function scrapeSilpo() {
       "Accept-Language": "uk-UA,uk;q=0.9,en;q=0.8"
     });
 
-    await page.setRequestInterception(true);
-
-    page.on("request", (request) => {
-      const resourceType = request.resourceType();
-      const url = request.url();
-
-      if (
-        resourceType === "font" ||
-        resourceType === "media" ||
-        resourceType === "websocket" ||
-        url.includes("doubleclick.net") ||
-        url.includes("google-analytics.com") ||
-        url.includes("googletagmanager.com") ||
-        url.includes("facebook.net") ||
-        url.includes("clarity.ms")
-      ) {
-        request.abort();
-        return;
-      }
-
-      request.continue();
-    });
-
     await page.goto(SILPO_OFFERS_URL, {
-      waitUntil: "domcontentloaded",
-      timeout: 90000
+      waitUntil: "networkidle2",
+      timeout: 60000
     });
 
-    await sleep(2500);
+    await sleep(4000);
     await acceptCookies(page);
-    await sleep(1000);
-
-    const hasPricesEarly = await waitForPrices(page);
-
-    if (!hasPricesEarly) {
-      await autoScroll(page);
-      await sleep(2000);
-      await waitForPrices(page);
-    } else {
-      await autoScroll(page);
-      await sleep(1500);
-    }
+    await autoScroll(page);
+    await sleep(3000);
 
     const items = await page.evaluate(() => {
       function text(el) {
@@ -192,10 +139,7 @@ async function scrapeSilpo() {
       function cleanupTitle(title) {
         return String(title || "")
           .replace(/\s+/g, " ")
-          .replace(
-            /\s+\d+(?:[.,]\d+)?\s?(г|кг|мл|л|шт)\s+\d+(?:[.,]\d+)?(?:\s*\/5)?$/i,
-            ""
-          )
+          .replace(/\s+\d+(?:[.,]\d+)?\s?(г|кг|мл|л|шт)\s+\d+(?:[.,]\d+)?(?:\s*\/5)?$/i, "")
           .replace(/\s+\d+(?:[.,]\d+)?\s?(г|кг|мл|л|шт)$/i, "")
           .trim();
       }
@@ -253,7 +197,7 @@ async function scrapeSilpo() {
           title: parsed.title,
           price: parsed.price,
           oldPrice: parsed.oldPrice || parsed.price,
-          imageUrl: normalizeImage(imageUrl)
+          imageUrl
         });
       }
 
@@ -268,7 +212,7 @@ async function scrapeSilpo() {
     console.error("❌ SILPO ERROR:", e.message);
     return [];
   } finally {
-    await browser.close().catch(() => {});
+    await browser.close();
   }
 }
 
