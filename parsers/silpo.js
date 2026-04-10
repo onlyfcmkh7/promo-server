@@ -23,25 +23,90 @@ function normalizeImage(url) {
   return url;
 }
 
+function detectCategory(title) {
+  const t = String(title || "").toLowerCase();
+
+  if (/\b(молоко|кефір|ряжанка|йогурт|сир|творог|кисломолочн|сметан|вершк|масло\b|моцарел|бринз|фет[аи]?|гауд|чедер|пармезан|маскарпоне|рікот|айран)\b/i.test(t)) {
+    return "dairy";
+  }
+
+  if (/\b(хліб|батон|багет|лаваш|булочк|чіабат|бріош|тостов|паляниц|круасан)\b/i.test(t)) {
+    return "bread";
+  }
+
+  if (/\b(курк|куряч|філе кур|стегно кур|гомілка кур|крило кур)\b/i.test(t)) {
+    return "chicken";
+  }
+
+  if (/\b(свинин|свиняч|ошийок|ребра свин|лопатка свин|корейка свин)\b/i.test(t)) {
+    return "pork";
+  }
+
+  if (/\b(телятина|теляч|теляче)\b/i.test(t)) {
+    return "veal";
+  }
+
+  if (/\b(риба|лосос|форел|оселед|скумбр|тунец|хек|минтай|дорадо|сибас|короп)\b/i.test(t)) {
+    return "fish";
+  }
+
+  if (/\b(кревет|міді|миді|кальмар|морепродукт|восьмин|лангустин|рапан)\b/i.test(t)) {
+    return "seafood";
+  }
+
+  if (/\b(соус|кетчуп|майонез|гірчиц|гірчичн|теріякі|барбекю|bbq|песто|сацебелі|аджика|соєвий)\b/i.test(t)) {
+    return "sauces";
+  }
+
+  if (/\b(олія|оливкова олія|соняшникова олія|кукурудзяна олія|рапсова олія|масло оливкове)\b/i.test(t)) {
+    return "oil";
+  }
+
+  if (/\b(шоколад|шоколадка|chocolate|панеттоне|кекс)\b/i.test(t)) {
+    return "chocolate";
+  }
+
+  if (/\b(вода|мінеральна вода|газована вода|негазована вода|питна вода)\b/i.test(t)) {
+    return "water";
+  }
+
+  if (/\b(пиво|lager|ale|stout|ipa|porter|пшеничне пиво)\b/i.test(t)) {
+    return "beer";
+  }
+
+  if (/\b(сидр|слабоалкоголь|hard seltzer|алкогольний коктейль|коктейль алкогольний)\b/i.test(t)) {
+    return "low_alcohol";
+  }
+
+  if (/\b(горілка|віскі|коньяк|ром|джин|текіла|бренді|лікер|настоянка|бурбон)\b/i.test(t)) {
+    return "strong_alcohol";
+  }
+
+  return "other";
+}
+
 async function acceptCookies(page) {
   const buttons = await page.$$("button, a, [role='button']");
 
   for (const btn of buttons) {
     try {
-      const text = await page.evaluate(el => (el.innerText || "").trim(), btn);
+      const text = await page.evaluate(
+        (el) => (el.innerText || "").trim(),
+        btn
+      );
 
       if (/прийняти|accept|ok|добре|зрозуміло/i.test(text)) {
         await btn.click().catch(() => {});
         await sleep(1000);
         return;
       }
-    } catch {}
+    } catch (_) {}
   }
 }
 
 async function autoScroll(page) {
   await page.evaluate(async () => {
-    await new Promise(resolve => {
+    await new Promise((resolve) => {
       let total = 0;
       const step = 800;
       let idle = 0;
@@ -113,6 +178,27 @@ async function scrapeSilpo() {
 
         const num = Number(cleaned);
         return Number.isFinite(num) ? Number(num.toFixed(2)) : null;
+      }
+
+      function detectCategory(title) {
+        const t = String(title || "").toLowerCase();
+
+        if (/\b(молоко|кефір|ряжанка|йогурт|сир|творог|кисломолочн|сметан|вершк|масло\b|моцарел|бринз|фет[аи]?|гауд|чедер|пармезан|маскарпоне|рікот|айран)\b/i.test(t)) return "dairy";
+        if (/\b(хліб|батон|багет|лаваш|булочк|чіабат|бріош|тостов|паляниц|круасан)\b/i.test(t)) return "bread";
+        if (/\b(курк|куряч|філе кур|стегно кур|гомілка кур|крило кур)\b/i.test(t)) return "chicken";
+        if (/\b(свинин|свиняч|ошийок|ребра свин|лопатка свин|корейка свин)\b/i.test(t)) return "pork";
+        if (/\b(телятина|теляч|теляче)\b/i.test(t)) return "veal";
+        if (/\b(риба|лосос|форел|оселед|скумбр|тунец|хек|минтай|дорадо|сибас|короп)\b/i.test(t)) return "fish";
+        if (/\b(кревет|міді|миді|кальмар|морепродукт|восьмин|лангустин|рапан)\b/i.test(t)) return "seafood";
+        if (/\b(соус|кетчуп|майонез|гірчиц|гірчичн|теріякі|барбекю|bbq|песто|сацебелі|аджика|соєвий)\b/i.test(t)) return "sauces";
+        if (/\b(олія|оливкова олія|соняшникова олія|кукурудзяна олія|рапсова олія|масло оливкове)\b/i.test(t)) return "oil";
+        if (/\b(шоколад|шоколадка|chocolate|панеттоне|кекс)\b/i.test(t)) return "chocolate";
+        if (/\b(вода|мінеральна вода|газована вода|негазована вода|питна вода)\b/i.test(t)) return "water";
+        if (/\b(пиво|lager|ale|stout|ipa|porter|пшеничне пиво)\b/i.test(t)) return "beer";
+        if (/\b(сидр|слабоалкоголь|hard seltzer|алкогольний коктейль|коктейль алкогольний)\b/i.test(t)) return "low_alcohol";
+        if (/\b(горілка|віскі|коньяк|ром|джин|текіла|бренді|лікер|настоянка|бурбон)\b/i.test(t)) return "strong_alcohol";
+
+        return "other";
       }
 
       function getImage(node) {
@@ -194,10 +280,19 @@ async function scrapeSilpo() {
         seen.add(key);
 
         result.push({
+          id: String(result.length + 1),
+          storeId: 2,
           title: parsed.title,
+          category: detectCategory(parsed.title),
+          brand: parsed.title.split(" ")[0] || "",
           price: parsed.price,
           oldPrice: parsed.oldPrice || parsed.price,
-          imageUrl
+          discountPercent:
+            parsed.oldPrice && parsed.oldPrice > parsed.price
+              ? Math.round(((parsed.oldPrice - parsed.price) / parsed.oldPrice) * 100)
+              : null,
+          createdAt: Date.now(),
+          imageUrl: normalizeImage(imageUrl)
         });
       }
 
