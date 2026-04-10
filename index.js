@@ -6,6 +6,7 @@ const { scrapeSilpo } = require("./parsers/silpo");
 const { scrapeMetro } = require("./parsers/metro");
 const { scrapeKlass } = require("./parsers/klass");
 const { scrapeVostorg } = require("./parsers/vostorg");
+const { scrapeRost } = require("./parsers/rost");
 
 const app = express();
 app.use(cors());
@@ -63,6 +64,17 @@ app.get("/promotions/vostorg", async (_req, res) => {
     res.json(data);
   } catch (e) {
     console.error("VOSTORG ERROR:", e);
+    res.status(500).json({ error: "fail" });
+  }
+});
+
+// 🟠 ROST
+app.get("/promotions/rost", async (_req, res) => {
+  try {
+    const data = await scrapeRost();
+    res.json(data);
+  } catch (e) {
+    console.error("ROST ERROR:", e);
     res.status(500).json({ error: "fail" });
   }
 });
