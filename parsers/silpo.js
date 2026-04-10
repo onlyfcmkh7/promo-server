@@ -20,8 +20,10 @@ function parsePrice(value) {
 
 function normalizeImageUrl(url) {
   if (!url) return "";
+
   if (url.startsWith("//")) return `https:${url}`;
   if (url.startsWith("/")) return `https://silpo.ua${url}`;
+
   return url;
 }
 
@@ -34,6 +36,51 @@ function detectBrand(title) {
   }
 
   return safeTitle.split(" ")[0] || "";
+}
+
+function normalizeTitle(title) {
+  return String(title || "")
+    .replace(/\s+/g, " ")
+    .replace(/\s+-\s+\d+$/, "")
+    .trim();
+}
+
+function isBadTitle(title) {
+  const value = normalizeTitle(title).toLowerCase();
+
+  if (!value) return true;
+  if (value.length < 5) return true;
+
+  return [
+    "header logo",
+    "logo",
+    "only_online",
+    "additional",
+    "national-cashback",
+    "cinotyzhyky",
+    "цінодіжики",
+    "cinodidjiky",
+    "katalogh-asortyment",
+    "velykden",
+    "melkoopt",
+    "rose mojito",
+    "rose spritz",
+    "redberry spritz"
+  ].includes(value);
+}
+
+function getImageScore(url) {
+  const value = String(url || "").toLowerCase();
+
+  if (value.includes("/600x600/")) return 3;
+  if (value.includes("/300x300/")) return 2;
+  if (value.includes("/90x90/")) return 1;
+
+  return 0;
+}
+
+function buildSilpoKey(item) {
+  return `${normalizeTitle(item.title)}|${item.price}|${item.oldPrice}`;
 }
 
 async function autoScroll(page) {
@@ -112,7 +159,7 @@ async function scrapeSilpo() {
           .trim();
       }
 
-      function normalizeTitle(value) {
+      function normalizeTitleInner(value) {
         return String(value || "")
           .replace(/\s+/g, " ")
           .replace(/\s+-\s+\d+$/, "")
@@ -134,7 +181,10 @@ async function scrapeSilpo() {
           "cinodidjiky",
           "katalogh-asortyment",
           "velykden",
-          "melkoopt"
+          "melkoopt",
+          "rose mojito",
+          "rose spritz",
+          "redberry spritz"
         ].includes(alt);
       }
 
@@ -155,7 +205,7 @@ async function scrapeSilpo() {
         if (!value) return false;
         if (value.includes("content.silpo.ua/hermes/")) return false;
         if (value.includes("logotype.svg")) return false;
-        if (value.includes(".svg")) return false;
+        if (value.endsWith(".svg")) return false;
 
         return (
           value.includes("images.silpo.ua") &&
@@ -188,7 +238,7 @@ async function scrapeSilpo() {
       const seen = new Set();
 
       for (const img of images) {
-        const title = normalizeTitle(img.getAttribute("alt"));
+        const title = normalizeTitleInner(img.getAttribute("alt"));
         const imageUrl = getImgUrl(img);
 
         if (!title || title.length < 5) continue;
@@ -227,27 +277,58 @@ async function scrapeSilpo() {
     console.log("🔍 FOUND SILPO RAW:", rawItems.length);
     console.log("🔍 SAMPLE SILPO RAW:", rawItems.slice(0, 10));
 
-    const items = rawItems
-      .map((item, i) => {
+    const parsedItems = rawItems
+      .map((item) => {
+        const title = normalizeTitle(item.title);
         const price = parsePrice(item.priceText);
         const oldPrice = parsePrice(item.oldPriceText);
+        const imageUrl = normalizeImageUrl(item.imageUrl);
 
         if (!price || !oldPrice || !(oldPrice > price)) return null;
+        if (isBadTitle(title)) return null;
+        if (!imageUrl) return null;
 
         return {
-          id: String(i + 1),
-          storeId: 2,
-          title: item.title,
-          brand: detectBrand(item.title),
+          title,
           price,
           oldPrice,
-          discountPercent: Math.round(((oldPrice - price) / oldPrice) * 100),
-          imageUrl: normalizeImageUrl(item.imageUrl)
+          imageUrl
         };
       })
       .filter(Boolean);
 
+    const bestByProduct = new Map();
+
+    for (const item of parsedItems) {
+      const key = buildSilpoKey(item);
+      const existing = bestByProduct.get(key);
+
+      if (!existing) {
+        bestByProduct.set(key, item);
+        continue;
+      }
+
+      const currentScore = getImageScore(item.imageUrl);
+      const existingScore = getImageScore(existing.imageUrl);
+
+      if (currentScore > existingScore) {
+        bestByProduct.set(key, item);
+      }
+    }
+
+    const items = [...bestByProduct.values()].map((item, i) => ({
+      id: String(i + 1),
+      storeId: 2,
+      title: item.title,
+      brand: detectBrand(item.title),
+      price: item.price,
+      oldPrice: item.oldPrice,
+      discountPercent: Math.round(((item.oldPrice - item.price) / item.oldPrice) * 100),
+      imageUrl: item.imageUrl
+    }));
+
     console.log("✅ FINAL SILPO:", items.length);
+    console.log("✅ SAMPLE FINAL SILPO:", items.slice(0, 10));
 
     return items;
   } finally {
