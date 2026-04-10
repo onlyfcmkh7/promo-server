@@ -4,34 +4,55 @@ async function scrapeMetro() {
   const url =
     "https://metro.zakaz.ua/api/stores/48215685/products/?promo=1&page=1&page_size=100";
 
-  const res = await fetch(url);
-  const data = await res.json();
+  try {
+    const res = await fetch(url, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept": "application/json",
+        "Referer": "https://metro.zakaz.ua/uk/promotions/"
+      }
+    });
 
-  const items = data.results
-    .map((item, i) => {
-      const price = item.price;
-      const oldPrice = item.old_price;
+    const text = await res.text();
 
-      if (!price || !oldPrice || oldPrice <= price) return null;
+    // якщо прийшов HTML (блок)
+    if (!text || text.startsWith("<")) {
+      console.log("❌ METRO BLOCKED");
+      return [];
+    }
 
-      return {
-        id: String(i + 1),
-        storeId: 3,
-        title: item.title,
-        brand: item.title.split(" ")[0],
-        price,
-        oldPrice,
-        discountPercent: Math.round(
-          ((oldPrice - price) / oldPrice) * 100
-        ),
-        imageUrl: item.image?.s350 || item.image?.s200 || ""
-      };
-    })
-    .filter(Boolean);
+    const data = JSON.parse(text);
 
-  console.log("✅ METRO:", items.length);
+    const items = (data.results || [])
+      .map((item, i) => {
+        const price = item.price;
+        const oldPrice = item.old_price;
 
-  return items;
+        if (!price || !oldPrice || oldPrice <= price) return null;
+
+        return {
+          id: String(i + 1),
+          storeId: 3,
+          title: item.title,
+          brand: (item.title || "").split(" ")[0],
+          price,
+          oldPrice,
+          discountPercent: Math.round(
+            ((oldPrice - price) / oldPrice) * 100
+          ),
+          imageUrl: item.image?.s350 || item.image?.s200 || ""
+        };
+      })
+      .filter(Boolean);
+
+    console.log("✅ METRO:", items.length);
+
+    return items;
+  } catch (e) {
+    console.error("❌ METRO ERROR:", e);
+    return [];
+  }
 }
 
 module.exports = { scrapeMetro };
