@@ -1,6 +1,16 @@
 const puppeteer = require("puppeteer");
 
-const KLASS_URL = "https://klassmarket.ua/aktsii/";
+const PROMO_URLS = [
+  "https://klassmarket.ua/aktsiia-kupui-vyhidno/",
+  "https://klassmarket.ua/yarmarok-nyzkykh-tsin/",
+  "https://klassmarket.ua/aktsiia-rybnyi-bazar/",
+  "https://klassmarket.ua/aktsiia-pyvni-znyzhky/",
+  "https://klassmarket.ua/aktsiia-chystyi-dim/",
+  "https://klassmarket.ua/znyzhky-v-kozhnyi-dim/",
+  "https://klassmarket.ua/aktsiia-kupui-do-postu/",
+  "https://klassmarket.ua/aktsiia-kupui-do-velykodnia/",
+  "https://klassmarket.ua/aktsiia-sviatkovi-napoi/"
+];
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -31,10 +41,8 @@ function detectBrand(title) {
 
 function normalizeImageUrl(url) {
   if (!url) return "";
-
   if (url.startsWith("//")) return `https:${url}`;
   if (url.startsWith("/")) return `https://klassmarket.ua${url}`;
-
   return url;
 }
 
@@ -53,19 +61,128 @@ async function autoScroll(page) {
   await page.evaluate(async () => {
     await new Promise((resolve) => {
       let total = 0;
-      const distance = 500;
+      const distance = 600;
 
       const timer = setInterval(() => {
         window.scrollBy(0, distance);
         total += distance;
 
-        if (total >= document.body.scrollHeight) {
+        if (total >= document.body.scrollHeight + 2000) {
           clearInterval(timer);
           resolve();
         }
-      }, 200);
+      }, 250);
     });
   });
+}
+
+async function acceptCookies(page) {
+  const buttons = await page.$$("button, a, div[role='button']");
+
+  for (const button of buttons) {
+    try {
+      const text = await page.evaluate(
+        (el) => (el.innerText || el.textContent || "").trim(),
+        button
+      );
+
+      if (/погодитися|прийняти|accept|ok/i.test(text)) {
+        await button.click({ delay: 50 }).catch(() => {});
+        await sleep(1200);
+        break;
+      }
+    } catch (_) {}
+  }
+}
+
+async function scrapePromoPage(page, url) {
+  await page.goto(url, {
+    waitUntil: "networkidle2",
+    timeout: 60000
+  });
+
+  await sleep(2500);
+  await acceptCookies(page);
+  await autoScroll(page);
+  await sleep(1500);
+
+  const rawItems = await page.evaluate(() => {
+    function txt(el) {
+      return (el?.innerText || el?.textContent || "")
+        .replace(/\s+/g, " ")
+        .trim();
+    }
+
+    function getImg(card) {
+      const img = card.querySelector("img");
+      if (!img) return "";
+
+      return (
+        img.currentSrc ||
+        img.src ||
+        img.getAttribute("data-src") ||
+        img.getAttribute("data-lazy-src") ||
+        ""
+      );
+    }
+
+    function extractFromCard(card) {
+      const title =
+        txt(card.querySelector(".woocommerce-loop-product__title")) ||
+        txt(card.querySelector("h2")) ||
+        txt(card.querySelector("h3")) ||
+        txt(card.querySelector(".product-title")) ||
+        txt(card.querySelector("a"));
+
+      if (!title || title.length < 5) return null;
+
+      const text = txt(card);
+
+      // шукаємо дві ціни типу 35.50 грн/100 гр 24.90 грн/100 гр
+      const matches = [
+        ...text.matchAll(/(\d[\d\s.,]*)\s*грн(?:\/[^\s]+(?:\s*[^\s]+)?)?/gi)
+      ].map((m) => m[1]);
+
+      if (matches.length < 2) return null;
+
+      return {
+        title,
+        oldPriceText: matches[0],
+        priceText: matches[1],
+        imageUrl: getImg(card)
+      };
+    }
+
+    const result = [];
+    const seen = new Set();
+
+    const cardSelectors = [
+      "li.product",
+      ".product",
+      ".products li",
+      ".woocommerce ul.products li.product",
+      "[class*='product']"
+    ];
+
+    const cards = cardSelectors.flatMap((selector) =>
+      Array.from(document.querySelectorAll(selector))
+    );
+
+    for (const card of cards) {
+      const item = extractFromCard(card);
+      if (!item) continue;
+
+      const key = `${item.title}|${item.oldPriceText}|${item.priceText}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      result.push(item);
+    }
+
+    return result;
+  });
+
+  return rawItems;
 }
 
 async function scrapeKlass() {
@@ -87,97 +204,15 @@ async function scrapeKlass() {
       "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
     );
 
-    await page.goto(KLASS_URL, {
-      waitUntil: "networkidle2",
-      timeout: 60000
-    });
-
-    await sleep(3000);
-    await autoScroll(page);
-    await sleep(2500);
-
-    const promoLinks = await page.evaluate(() => {
-      const links = [...document.querySelectorAll("a[href]")];
-
-      return [...new Set(
-        links
-          .map((a) => a.href)
-          .filter((href) =>
-            href &&
-            href.startsWith("https://klassmarket.ua/") &&
-            !href.includes("/product/") &&
-            !href.includes("/page/") &&
-            !href.includes("/tag/") &&
-            href !== "https://klassmarket.ua/aktsii/" &&
-            href !== "https://klassmarket.ua/aktsii"
-          )
-      )];
-    });
-
-    const limitedLinks = promoLinks.slice(0, 12);
     let allRawItems = [];
 
-    for (const link of limitedLinks) {
+    for (const url of PROMO_URLS) {
       try {
-        await page.goto(link, {
-          waitUntil: "networkidle2",
-          timeout: 60000
-        });
-
-        await sleep(2000);
-        await autoScroll(page);
-        await sleep(1500);
-
-        const rawItems = await page.evaluate(() => {
-          function txt(el) {
-            return (el?.innerText || el?.textContent || "")
-              .replace(/\s+/g, " ")
-              .trim();
-          }
-
-          function getImg(card) {
-            const img = card.querySelector("img");
-            if (!img) return "";
-
-            return (
-              img.currentSrc ||
-              img.src ||
-              img.getAttribute("data-src") ||
-              img.getAttribute("data-lazy-src") ||
-              ""
-            );
-          }
-
-          const result = [];
-          const cards = document.querySelectorAll("li.product");
-
-          cards.forEach((card) => {
-            const title =
-              txt(card.querySelector(".woocommerce-loop-product__title")) ||
-              txt(card.querySelector("h2")) ||
-              txt(card.querySelector("h3")) ||
-              txt(card.querySelector("a"));
-
-            const priceBlock = txt(card.querySelector(".price"));
-            if (!title || !priceBlock) return;
-
-            const prices = priceBlock.match(/(\d[\d\s.,]*)/g);
-            if (!prices || prices.length < 2) return;
-
-            result.push({
-              title,
-              priceText: prices[1],
-              oldPriceText: prices[0],
-              imageUrl: getImg(card)
-            });
-          });
-
-          return result;
-        });
-
-        allRawItems = allRawItems.concat(rawItems);
+        const items = await scrapePromoPage(page, url);
+        console.log("KLASS PAGE:", url, items.length);
+        allRawItems = allRawItems.concat(items);
       } catch (e) {
-        console.log("KLASS PAGE SKIP:", link);
+        console.log("KLASS PAGE SKIP:", url);
       }
     }
 
