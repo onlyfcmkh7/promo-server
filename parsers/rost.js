@@ -1,84 +1,166 @@
-const express = require("express");
-const cors = require("cors");
+const puppeteer = require("puppeteer");
 
-const { scrapeATB } = require("./parsers/atb");
-const { scrapeSilpo } = require("./parsers/silpo");
-const { scrapeMetro } = require("./parsers/metro");
-const { scrapeKlass } = require("./parsers/klass");
-const { scrapeVostorg } = require("./parsers/vostorg");
-const { scrapeRost } = require("./parsers/rost");
+const ROST_URL = "https://rost.kh.ua/";
 
-const app = express();
-app.use(cors());
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
-const PORT = process.env.PORT || 3000;
+function parsePrice(value) {
+  if (!value) return null;
 
-// 🔵 ATB
-app.get("/promotions/atb", async (_req, res) => {
+  const cleaned = String(value)
+    .replace(/\s+/g, "")
+    .replace(",", ".")
+    .replace(/[^\d.]/g, "");
+
+  const num = Number(cleaned);
+  return Number.isFinite(num) ? num : null;
+}
+
+function normalizeTitle(title) {
+  return String(title || "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function detectBrand(title) {
+  return normalizeTitle(title).split(" ")[0] || "";
+}
+
+function normalizeImageUrl(url) {
+  if (!url) return "";
+
+  if (url.startsWith("//")) return `https:${url}`;
+  if (url.startsWith("/")) return `https://rost.kh.ua${url}`;
+
+  return url;
+}
+
+async function autoScroll(page) {
+  await page.evaluate(async () => {
+    await new Promise((resolve) => {
+      let total = 0;
+      const distance = 500;
+
+      const timer = setInterval(() => {
+        window.scrollBy(0, distance);
+        total += distance;
+
+        if (total >= document.body.scrollHeight) {
+          clearInterval(timer);
+          resolve();
+        }
+      }, 200);
+    });
+  });
+}
+
+async function scrapeRost() {
+  console.log("🚀 START SCRAPING ROST");
+
+  const browser = await puppeteer.launch({
+    headless: "new",
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage"
+    ]
+  });
+
   try {
-    const data = await scrapeATB();
-    res.json(data);
-  } catch (e) {
-    console.error("ATB ERROR:", e);
-    res.status(500).json({ error: "fail" });
-  }
-});
+    const page = await browser.newPage();
 
-// 🟢 SILPO
-app.get("/promotions/silpo", async (_req, res) => {
-  try {
-    const data = await scrapeSilpo();
-    res.json(data);
-  } catch (e) {
-    console.error("SILPO ERROR:", e);
-    res.status(500).json({ error: "fail" });
-  }
-});
+    await page.setUserAgent(
+      "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    );
 
-// 🟡 METRO
-app.get("/promotions/metro", async (_req, res) => {
-  try {
-    const data = await scrapeMetro();
-    res.json(data);
-  } catch (e) {
-    console.error("METRO ERROR:", e);
-    res.status(500).json({ error: "fail" });
-  }
-});
+    await page.goto(ROST_URL, {
+      waitUntil: "networkidle2",
+      timeout: 60000
+    });
 
-// 🔴 KLASS
-app.get("/promotions/klass", async (_req, res) => {
-  try {
-    const data = await scrapeKlass();
-    res.json(data);
-  } catch (e) {
-    console.error("KLASS ERROR:", e);
-    res.status(500).json({ error: "fail" });
-  }
-});
+    await sleep(3000);
+    await autoScroll(page);
+    await sleep(2000);
 
-// 🟣 VOSTORG
-app.get("/promotions/vostorg", async (_req, res) => {
-  try {
-    const data = await scrapeVostorg();
-    res.json(data);
-  } catch (e) {
-    console.error("VOSTORG ERROR:", e);
-    res.status(500).json({ error: "fail" });
-  }
-});
+    const rawItems = await page.evaluate(() => {
+      function txt(el) {
+        return (el?.innerText || el?.textContent || "")
+          .replace(/\s+/g, " ")
+          .trim();
+      }
 
-// 🟠 ROST
-app.get("/promotions/rost", async (_req, res) => {
-  try {
-    const data = await scrapeRost();
-    res.json(data);
-  } catch (e) {
-    console.error("ROST ERROR:", e);
-    res.status(500).json({ error: "fail" });
-  }
-});
+      function getImg(card) {
+        const img = card.querySelector("img");
+        if (!img) return "";
 
-app.listen(PORT, () => {
-  console.log("Server running on", PORT);
-});
+        return (
+          img.currentSrc ||
+          img.src ||
+          img.getAttribute("data-src") ||
+          img.getAttribute("data-lazy-src") ||
+          ""
+        );
+      }
+
+      const result = [];
+      const cards = document.querySelectorAll("a[href*='product']");
+
+      cards.forEach((link) => {
+        const title = txt(link);
+        if (!title) return;
+
+        const card = link.closest("div");
+        if (!card) return;
+
+        const text = txt(card);
+        const prices = text.match(/(\d[\d\s.,]*)/g);
+
+        if (!prices || prices.length < 2) return;
+
+        result.push({
+          title,
+          oldPriceText: prices[0],
+          priceText: prices[1],
+          imageUrl: getImg(card)
+        });
+      });
+
+      return result;
+    });
+
+    const items = rawItems
+      .map((item, i) => {
+        const title = normalizeTitle(item.title);
+        const price = parsePrice(item.priceText);
+        const oldPrice = parsePrice(item.oldPriceText);
+        const imageUrl = normalizeImageUrl(item.imageUrl);
+
+        if (!title) return null;
+        if (!price || !oldPrice || !(oldPrice > price)) return null;
+
+        return {
+          id: String(i + 1),
+          storeId: 6,
+          title,
+          brand: detectBrand(title),
+          price,
+          oldPrice,
+          discountPercent: Math.round(
+            ((oldPrice - price) / oldPrice) * 100
+          ),
+          imageUrl
+        };
+      })
+      .filter(Boolean);
+
+    console.log("✅ FINAL ROST:", items.length);
+
+    return items;
+  } finally {
+    await browser.close();
+  }
+}
+
+module.exports = { scrapeRost };
