@@ -7,7 +7,7 @@ function sleep(ms) {
 }
 
 function parsePrice(value) {
-  const cleaned = String(value)
+  const cleaned = String(value || "")
     .replace(/\s+/g, "")
     .replace(",", ".")
     .replace(/[^\d.]/g, "");
@@ -24,13 +24,13 @@ function normalizeImage(url) {
 }
 
 async function acceptCookies(page) {
-  const buttons = await page.$$("button, a");
+  const buttons = await page.$$("button, a, [role='button']");
 
   for (const btn of buttons) {
     try {
-      const text = await page.evaluate(el => el.innerText, btn);
+      const text = await page.evaluate(el => (el.innerText || "").trim(), btn);
 
-      if (/прийняти|accept|ok|добре/i.test(text)) {
+      if (/прийняти|accept|ok|добре|зрозуміло/i.test(text)) {
         await btn.click().catch(() => {});
         await sleep(1000);
         return;
@@ -44,16 +44,26 @@ async function autoScroll(page) {
     await new Promise(resolve => {
       let total = 0;
       const step = 800;
+      let idle = 0;
+      let lastHeight = document.body.scrollHeight;
 
       const timer = setInterval(() => {
         window.scrollBy(0, step);
         total += step;
 
-        if (total > document.body.scrollHeight) {
+        const currentHeight = document.body.scrollHeight;
+        if (currentHeight === lastHeight) {
+          idle += 1;
+        } else {
+          idle = 0;
+          lastHeight = currentHeight;
+        }
+
+        if (idle >= 5 || total > currentHeight + 2000) {
           clearInterval(timer);
           resolve();
         }
-      }, 400);
+      }, 500);
     });
   });
 }
@@ -63,13 +73,20 @@ async function scrapeSilpo() {
 
   const browser = await puppeteer.launch({
     headless: "new",
-    args: ["--no-sandbox"]
+    args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"]
   });
 
   try {
     const page = await browser.newPage();
 
-    await page.setViewport({ width: 1400, height: 2000 });
+    await page.setViewport({ width: 1440, height: 2200 });
+    await page.setUserAgent(
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36"
+    );
+
+    await page.setExtraHTTPHeaders({
+      "Accept-Language": "uk-UA,uk;q=0.9,en;q=0.8"
+    });
 
     await page.goto(SILPO_OFFERS_URL, {
       waitUntil: "networkidle2",
@@ -89,7 +106,7 @@ async function scrapeSilpo() {
       }
 
       function parsePrice(value) {
-        const cleaned = String(value)
+        const cleaned = String(value || "")
           .replace(/\s+/g, "")
           .replace(",", ".")
           .replace(/[^\d.]/g, "");
@@ -106,15 +123,32 @@ async function scrapeSilpo() {
             img.currentSrc ||
             img.src ||
             img.getAttribute("src") ||
+            img.getAttribute("data-src") ||
             "";
 
-          if (/images\.silpo\.ua/.test(src)) {
-            return src;
-          }
+          if (!src) continue;
+          if (/\.svg(\?|$)/i.test(src)) continue;
+          if (/MediaBubbles|Activities|site\.svg|hermes/i.test(src)) continue;
+
+          return src;
         }
 
         return "";
       }
+
+      function cleanupTitle(title) {
+        return String(title || "")
+          .replace(/\s+/g, " ")
+          .replace(/\s+\d+(?:[.,]\d+)?\s?(г|кг|мл|л|шт)\s+\d+(?:[.,]\d+)?(?:\s*\/5)?$/i, "")
+          .replace(/\s+\d+(?:[.,]\d+)?\s?(г|кг|мл|л|шт)$/i, "")
+          .trim();
+      }
+
+      const patterns = [
+        /(\d[\d\s.,]*)\s*(?:грн|₴)\s+(\d[\d\s.,]*)\s*(?:грн|₴)\s+-\s*(\d+)%\s+(.+?)\s+(\d+(?:[.,]\d+)?\s?(?:г|кг|мл|л|шт))(?:\s+\d+(?:[.,]\d+)?(?:\s*\/5)?)?$/i,
+        /(\d[\d\s.,]*)\s*(?:грн|₴)\s+Роздріб\s+(\d[\d\s.,]*)\s*(?:грн|₴)\s+від\s+(\d+)\s+шт\s+(.+?)\s+(\d+(?:[.,]\d+)?\s?(?:г|кг|мл|л|шт))(?:\s+\d+(?:[.,]\d+)?(?:\s*\/5)?)?$/i,
+        /(\d[\d\s.,]*)\s*(?:грн|₴)\s+(\d[\d\s.,]*)\s*(?:грн|₴)\s+(.+?)\s+(\d+(?:[.,]\d+)?\s?(?:г|кг|мл|л|шт))(?:\s+\d+(?:[.,]\d+)?(?:\s*\/5)?)?$/i
+      ];
 
       const nodes = Array.from(document.querySelectorAll("a, article"));
       const result = [];
@@ -122,34 +156,48 @@ async function scrapeSilpo() {
 
       for (const node of nodes) {
         const full = text(node);
+        if (!/грн|₴/i.test(full)) continue;
 
-        if (!/грн|₴/.test(full)) continue;
+        const imageUrl = getImage(node);
+        if (!imageUrl) continue;
 
-        const match = full.match(
-          /(\d[\d\s.,]*)\s*(?:грн|₴)\s+(\d[\d\s.,]*)\s*(?:грн|₴)\s+-\s*(\d+)%\s+(.+?)\s+(\d+(?:[.,]\d+)?\s?(?:г|кг|мл|л|шт))/i
-        );
+        let parsed = null;
 
-        if (!match) continue;
+        for (const pattern of patterns) {
+          const m = full.match(pattern);
+          if (!m) continue;
 
-        const price = parsePrice(match[1]);
-        const oldPrice = parsePrice(match[2]);
-        const title = match[4].trim();
+          if (/Роздріб/i.test(full) && /від\s+\d+\s+шт/i.test(full)) {
+            parsed = {
+              price: parsePrice(m[2]),
+              oldPrice: parsePrice(m[1]),
+              title: cleanupTitle(m[4])
+            };
+          } else if (m.length >= 6) {
+            parsed = {
+              price: parsePrice(m[1]),
+              oldPrice: parsePrice(m[2]),
+              title: cleanupTitle(m[4] || m[3])
+            };
+          }
 
-        if (!price || !title) continue;
+          if (parsed?.price && parsed?.title) {
+            break;
+          }
+        }
 
-        const image = getImage(node);
-        if (!image) continue;
+        if (!parsed || !parsed.price || !parsed.title) continue;
+        if (/^\d+(г|кг|мл|л|шт)/i.test(parsed.title)) continue;
 
-        const key = title.toLowerCase() + price;
-
+        const key = `${parsed.title.toLowerCase()}|${parsed.price}|${parsed.oldPrice}`;
         if (seen.has(key)) continue;
         seen.add(key);
 
         result.push({
-          title,
-          price,
-          oldPrice,
-          imageUrl: image
+          title: parsed.title,
+          price: parsed.price,
+          oldPrice: parsed.oldPrice || parsed.price,
+          imageUrl
         });
       }
 
@@ -157,7 +205,7 @@ async function scrapeSilpo() {
     });
 
     console.log("✅ SILPO ITEMS:", items.length);
-    console.log("SAMPLE:", items.slice(0, 10));
+    console.log("SAMPLE:", JSON.stringify(items.slice(0, 10), null, 2));
 
     return items;
   } catch (e) {
