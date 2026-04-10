@@ -1,30 +1,48 @@
-async function scrapeMetro() {
-  console.log("🚀 METRO API");
+const puppeteer = require("puppeteer");
 
-  const url =
-    "https://metro.zakaz.ua/api/stores/48215685/products/?promo=1&page=1&page_size=100";
+async function scrapeMetro() {
+  console.log("🚀 METRO INTERCEPT");
+
+  const browser = await puppeteer.launch({
+    headless: "new",
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage"
+    ]
+  });
 
   try {
-    const res = await fetch(url, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Accept": "application/json",
-        "Referer": "https://metro.zakaz.ua/uk/promotions/"
+    const page = await browser.newPage();
+
+    let apiData = null;
+
+    // 🔥 ловимо API
+    page.on("response", async (response) => {
+      const url = response.url();
+
+      if (url.includes("/products") && url.includes("promo")) {
+        try {
+          const json = await response.json();
+          apiData = json;
+        } catch (_) {}
       }
     });
 
-    const text = await res.text();
+    await page.goto("https://metro.zakaz.ua/uk/promotions/", {
+      waitUntil: "networkidle2",
+      timeout: 60000
+    });
 
-    // якщо прийшов HTML (блок)
-    if (!text || text.startsWith("<")) {
-      console.log("❌ METRO BLOCKED");
+    // даємо час API прогрузитись
+    await new Promise((r) => setTimeout(r, 5000));
+
+    if (!apiData || !apiData.results) {
+      console.log("❌ NO API DATA");
       return [];
     }
 
-    const data = JSON.parse(text);
-
-    const items = (data.results || [])
+    const items = apiData.results
       .map((item, i) => {
         const price = item.price;
         const oldPrice = item.old_price;
@@ -49,9 +67,8 @@ async function scrapeMetro() {
     console.log("✅ METRO:", items.length);
 
     return items;
-  } catch (e) {
-    console.error("❌ METRO ERROR:", e);
-    return [];
+  } finally {
+    await browser.close();
   }
 }
 
