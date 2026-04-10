@@ -140,8 +140,6 @@ async function scrapeSilpo() {
       timeout: 60000
     });
 
-    console.log("SILPO PAGE URL:", page.url());
-
     await sleep(3000);
     await acceptCookies(page);
     await autoScroll(page);
@@ -254,9 +252,6 @@ async function scrapeSilpo() {
       return result;
     });
 
-    console.log("🔍 FOUND SILPO RAW:", rawItems.length);
-    console.log("🔍 SAMPLE SILPO RAW:", rawItems.slice(0, 10));
-
     const parsedItems = rawItems
       .map((item) => {
         const title = normalizeTitle(item.title);
@@ -305,7 +300,6 @@ async function scrapeSilpo() {
     }));
 
     console.log("✅ FINAL SILPO:", items.length);
-    console.log("✅ SAMPLE FINAL SILPO:", items.slice(0, 10));
 
     return items;
   } finally {
