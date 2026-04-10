@@ -61,10 +61,12 @@ async function scrapeRost() {
 
   const browser = await puppeteer.launch({
     headless: "new",
+    ignoreHTTPSErrors: true,
     args: [
       "--no-sandbox",
       "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage"
+      "--disable-dev-shm-usage",
+      "--ignore-certificate-errors"
     ]
   });
 
