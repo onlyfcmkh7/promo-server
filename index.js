@@ -39,9 +39,8 @@ app.get("/promotions/klass", async (_req, res) => {
   await handle(res, scrapeKlass, "KLASS");
 });
 
-app.get("/promotions/vostorg", async (req, res) => {
-  const q = (req.query.q || "молоко").trim();
-  await handle(res, () => scrapeVostorg(q), "VOSTORG");
+app.get("/promotions/vostorg", async (_req, res) => {
+  await handle(res, scrapeVostorg, "VOSTORG");
 });
 
 app.get("/promotions/rost", async (_req, res) => {
