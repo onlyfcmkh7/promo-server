@@ -90,16 +90,6 @@ async function scrapeSilpo() {
     await autoScroll(page);
     await sleep(2000);
 
-    const debugInfo = await page.evaluate(() => {
-      const imgs = document.querySelectorAll("img[alt]").length;
-      const cards = document.querySelectorAll("a, div, li, article").length;
-      const bodyText = (document.body?.innerText || "").slice(0, 1000);
-
-      return { imgs, cards, bodyText };
-    });
-
-    console.log("SILPO DEBUG:", debugInfo);
-
     const rawItems = await page.evaluate(() => {
       function txt(el) {
         return (el?.innerText || el?.textContent || "")
@@ -120,6 +110,17 @@ async function scrapeSilpo() {
         );
       }
 
+      function isBadAlt(value) {
+        const alt = String(value || "").trim().toLowerCase();
+
+        return [
+          "",
+          "header logo",
+          "only_online",
+          "logo"
+        ].includes(alt);
+      }
+
       const cards = [...document.querySelectorAll("a, div, li, article")];
       const result = [];
       const seen = new Set();
@@ -133,7 +134,10 @@ async function scrapeSilpo() {
         if (!img) continue;
 
         const title = img.getAttribute("alt")?.trim();
-        if (!title) continue;
+        if (!title || isBadAlt(title)) continue;
+
+        if (!/[а-яіїєґa-z]/i.test(title)) continue;
+        if (title.length < 5) continue;
 
         const match = text.match(
           /(\d[\d\s.,]*)\s*грн[\s\S]*?(\d[\d\s.,]*)\s*грн[\s\S]*?-\s*(\d+)%/i
@@ -141,14 +145,17 @@ async function scrapeSilpo() {
 
         if (!match) continue;
 
-        const key = title + match[1] + match[2];
+        const priceText = match[1];
+        const oldPriceText = match[2];
+
+        const key = `${title}|${priceText}|${oldPriceText}`;
         if (seen.has(key)) continue;
         seen.add(key);
 
         result.push({
           title,
-          priceText: match[1],
-          oldPriceText: match[2],
+          priceText,
+          oldPriceText,
           imageUrl: getImage(card)
         });
       }
@@ -157,7 +164,6 @@ async function scrapeSilpo() {
     });
 
     console.log("🔍 FOUND SILPO RAW:", rawItems.length);
-    console.log("🔍 SAMPLE SILPO RAW:", rawItems.slice(0, 3));
 
     const items = rawItems
       .map((item, i) => {
