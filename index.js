@@ -4,6 +4,7 @@ const cors = require("cors");
 const { scrapeATB } = require("./parsers/atb");
 const { scrapeSilpo } = require("./parsers/silpo");
 const { scrapeMetro } = require("./parsers/metro");
+const { scrapeKlass } = require("./parsers/klass");
 
 const app = express();
 app.use(cors());
@@ -39,6 +40,17 @@ app.get("/promotions/metro", async (_req, res) => {
     res.json(data);
   } catch (e) {
     console.error("METRO ERROR:", e);
+    res.status(500).json({ error: "fail" });
+  }
+});
+
+// 🔴 KLASS
+app.get("/promotions/klass", async (_req, res) => {
+  try {
+    const data = await scrapeKlass();
+    res.json(data);
+  } catch (e) {
+    console.error("KLASS ERROR:", e);
     res.status(500).json({ error: "fail" });
   }
 });
