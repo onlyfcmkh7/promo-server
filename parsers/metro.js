@@ -1,5 +1,3 @@
-const fetch = require("node-fetch");
-
 async function scrapeMetro() {
   console.log("🚀 METRO API");
 
@@ -21,9 +19,11 @@ async function scrapeMetro() {
         storeId: 3,
         title: item.title,
         brand: item.title.split(" ")[0],
-        price: price,
-        oldPrice: oldPrice,
-        discountPercent: Math.round(((oldPrice - price) / oldPrice) * 100),
+        price,
+        oldPrice,
+        discountPercent: Math.round(
+          ((oldPrice - price) / oldPrice) * 100
+        ),
         imageUrl: item.image?.s350 || item.image?.s200 || ""
       };
     })
