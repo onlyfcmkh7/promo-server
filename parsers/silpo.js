@@ -55,6 +55,8 @@ const CATEGORY_REGEX = {
   strong_alcohol: /\b(горілка|віскі|коньяк|ром|джин|текіла|бренді|лікер|настоянка|бурбон)\b/i
 };
 
+console.log("SILPO FILE LOADED");
+
 function parsePrice(value) {
   if (value === null || value === undefined || value === "") {
     return null;
@@ -189,18 +191,23 @@ function calculateDiscountPercent(price, oldPrice) {
 
 function extractServerAppState(html) {
   const match = html.match(
-    /<script[^>]+id="serverApp-state"[^>]*type="application\/json"[^>]*>([\s\S]*?)<\/script>/i
+    /<script[^>]*id="serverApp-state"[^>]*>([\s\S]*?)<\/script>/i
   );
 
   if (!match || !match[1]) {
+    console.log("serverApp-state script NOT FOUND");
     return null;
   }
 
   const rawJson = decodeHtmlEntities(match[1].trim());
 
+  console.log("serverApp-state RAW LENGTH:", rawJson.length);
+  console.log("serverApp-state RAW START:", rawJson.slice(0, 300));
+
   try {
     return JSON.parse(rawJson);
   } catch (error) {
+    console.log("JSON parse failed:", error.message);
     return null;
   }
 }
@@ -219,6 +226,16 @@ function collectItemsFromNode(node, collector) {
 
   if (typeof node !== "object") {
     return;
+  }
+
+  const title = node.title || node.name;
+  const hasPrice =
+    node.price !== undefined ||
+    node.displayPrice !== undefined ||
+    node.currentPrice !== undefined;
+
+  if (title && hasPrice) {
+    collector.push(node);
   }
 
   if (Array.isArray(node.items)) {
@@ -246,7 +263,8 @@ function extractItemsFromState(state) {
       item.offerId ||
       item.externalProductId ||
       item.slug ||
-      item.title;
+      item.title ||
+      item.name;
 
     if (!rawId) {
       continue;
@@ -331,26 +349,40 @@ function buildProductRecord(item, forcedCategory) {
 
 async function searchProducts(query) {
   try {
+    console.log("SILPO QUERY:", query);
+
     const response = await axios.get(BASE_URL, {
       params: { find: query },
       timeout: 30000,
       headers: {
         Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "User-Agent": "Mozilla/5.0 (compatible; SilpoHtmlParser/1.0)"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
+        "Accept-Language": "uk-UA,uk;q=0.9,en;q=0.8"
       }
     });
 
     const html = String(response.data || "");
+
+    console.log("HTML LENGTH:", html.length);
+    console.log("HAS serverApp-state:", html.includes('id="serverApp-state"'));
+
     if (!html) {
       return [];
     }
 
     const state = extractServerAppState(html);
+
+    console.log("STATE FOUND:", !!state);
+
     if (!state) {
       return [];
     }
 
-    return extractItemsFromState(state);
+    const items = extractItemsFromState(state);
+
+    console.log("RAW ITEMS:", items.length);
+
+    return items;
   } catch (error) {
     console.error(`Silpo search error for query "${query}":`, error.message);
     return [];
@@ -361,12 +393,16 @@ async function getCategoryProducts(category) {
   const queries = CATEGORY_QUERIES[category] || [category];
   const uniqueProducts = new Map();
 
+  console.log(`CATEGORY START: ${category}`);
+
   for (const query of queries) {
     if (uniqueProducts.size >= LIMIT_PER_CATEGORY) {
       break;
     }
 
     const rawProducts = await searchProducts(query);
+
+    console.log(`QUERY "${query}" RAW PRODUCTS:`, rawProducts.length);
 
     for (const rawProduct of rawProducts) {
       const builtProduct = buildProductRecord(rawProduct, category);
@@ -393,10 +429,16 @@ async function getCategoryProducts(category) {
     }
   }
 
-  return Array.from(uniqueProducts.values()).slice(0, LIMIT_PER_CATEGORY);
+  const result = Array.from(uniqueProducts.values()).slice(0, LIMIT_PER_CATEGORY);
+
+  console.log(`CATEGORY DONE: ${category} =>`, result.length);
+
+  return result;
 }
 
 async function scrapeSilpo() {
+  console.log("scrapeSilpo started");
+
   try {
     const allProducts = [];
     const globalUnique = new Map();
@@ -416,6 +458,8 @@ async function scrapeSilpo() {
     for (const product of globalUnique.values()) {
       allProducts.push(product);
     }
+
+    console.log("SILPO FINAL:", allProducts.length);
 
     return allProducts;
   } catch (error) {
