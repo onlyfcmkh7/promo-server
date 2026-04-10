@@ -3,21 +3,29 @@ const axios = require("axios");
 const STORE_ID = "482320001";
 
 function parsePrice(value) {
-  if (!value) return null;
-  return Number(value) / 100;
+  if (value === null || value === undefined) return null;
+
+  const num = Number(value);
+  if (!Number.isFinite(num)) return null;
+
+  return num / 100;
 }
 
-async function scrapeVostorg() {
-  console.log("🚀 START VOSTORG PROMOTIONS");
+async function scrapeVostorg(query = "молоко") {
+  console.log("🚀 START VOSTORG API");
 
   try {
-    const url = `https://stores-api.zakaz.ua/stores/${STORE_ID}/custom-categories/promotions/products/?page=1&page_size=100`;
+    const url = `https://stores-api.zakaz.ua/stores/${STORE_ID}/products/search?q=${encodeURIComponent(query)}`;
 
-    const res = await axios.get(url);
+    const res = await axios.get(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0",
+        Accept: "application/json"
+      },
+      timeout: 30000
+    });
 
-    const products = res.data.results || [];
-
-    console.log("🔍 RAW:", products.length);
+    const products = Array.isArray(res.data?.results) ? res.data.results : [];
 
     const items = products
       .map((p, i) => {
@@ -32,9 +40,9 @@ async function scrapeVostorg() {
             : null;
 
         return {
-          id: p.id || String(i + 1),
+          id: String(p.id || i + 1),
           storeId: 5,
-          title: p.title,
+          title: p.title || "",
           price,
           oldPrice,
           discountPercent,
