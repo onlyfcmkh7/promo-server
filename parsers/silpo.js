@@ -1,8 +1,8 @@
 const axios = require("axios");
 
-const STORE_ID = "silpo_kyiv";
 const STORE_NUMERIC_ID = 2;
-const BASE_URL = `https://stores-api.zakaz.ua/stores/${STORE_ID}/products/search`;
+const BASE_URL = "https://silpo.ua/search";
+const LIMIT_PER_CATEGORY = 10;
 
 const CATEGORY_ORDER = [
   "dairy",
@@ -34,7 +34,7 @@ const CATEGORY_QUERIES = {
   chocolate: ["шоколад", "шоколадка"],
   water: ["вода", "мінеральна вода", "газована вода", "негазована вода"],
   beer: ["пиво", "lager", "ale"],
-  low_alcohol: ["сидр", "ріді", "reeni", "слабоалкогольний напій", "hard seltzer", "коктейль алкогольний"],
+  low_alcohol: ["сидр", "слабоалкогольний напій", "hard seltzer", "коктейль алкогольний"],
   strong_alcohol: ["горілка", "віскі", "коньяк", "ром", "джин", "текіла", "бренді", "лікер"]
 };
 
@@ -51,7 +51,7 @@ const CATEGORY_REGEX = {
   chocolate: /\b(шоколад|шоколадка|chocolate)\b/i,
   water: /\b(вода|мінеральна вода|газована вода|негазована вода|питна вода)\b/i,
   beer: /\b(пиво|lager|ale|stout|ipa|porter|пшеничне пиво)\b/i,
-  low_alcohol: /\b(сидр|слабоалкоголь|hard seltzer|алкогольний коктейль|коктейль алкогольний|ріді|reeni)\b/i,
+  low_alcohol: /\b(сидр|слабоалкоголь|hard seltzer|алкогольний коктейль|коктейль алкогольний)\b/i,
   strong_alcohol: /\b(горілка|віскі|коньяк|ром|джин|текіла|бренді|лікер|настоянка|бурбон)\b/i
 };
 
@@ -103,30 +103,6 @@ function normalizeTitle(title) {
     .trim();
 }
 
-function detectBrand(title, product = {}) {
-  const directBrand =
-    product.brand ||
-    product.manufacturer ||
-    product.tm ||
-    product.trade_mark ||
-    product.tradeMark ||
-    product.brand_title ||
-    product.brandTitle;
-
-  if (directBrand) {
-    return String(directBrand).trim();
-  }
-
-  const safeTitle = normalizeTitle(title);
-  const quoted = safeTitle.match(/"([^"]+)"/);
-
-  if (quoted && quoted[1]) {
-    return quoted[1].trim();
-  }
-
-  return safeTitle.split(" ")[0] || "";
-}
-
 function detectCategory(title) {
   const normalized = normalizeTitle(title).toLowerCase();
 
@@ -156,206 +132,44 @@ function normalizeImageUrl(url) {
   }
 
   if (value.startsWith("/")) {
-    return `https://stores-api.zakaz.ua${value}`;
+    return `https://silpo.ua${value}`;
   }
 
   return value;
 }
 
-function extractId(product, fallbackTitle) {
-  const possibleKeys = [
-    "id",
-    "sku",
-    "ean",
-    "product_id",
-    "productId",
-    "uuid",
-    "external_id",
-    "externalId"
-  ];
-
-  for (const key of possibleKeys) {
-    const value = product[key];
-    if (value !== null && value !== undefined && String(value).trim() !== "") {
-      return String(value).trim();
-    }
-  }
-
-  return normalizeTitle(fallbackTitle);
+function decodeHtmlEntities(value) {
+  return String(value || "")
+    .replace(/&quot;/g, '"')
+    .replace(/&#34;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">");
 }
 
-function extractTitle(product) {
-  const possibleKeys = [
-    "title",
-    "name",
-    "display_name",
-    "displayName",
-    "full_title",
-    "fullTitle"
-  ];
+function detectBrand(title, item = {}) {
+  const directBrand =
+    item.brandTitle ||
+    item.brand ||
+    item.tm ||
+    item.manufacturer ||
+    item.tradeMark ||
+    item.trade_mark;
 
-  for (const key of possibleKeys) {
-    const value = product[key];
-    if (value !== null && value !== undefined && String(value).trim() !== "") {
-      return normalizeTitle(value);
-    }
+  if (directBrand) {
+    return String(directBrand).trim();
   }
 
-  return "";
-}
+  const safeTitle = normalizeTitle(title);
+  const quoted = safeTitle.match(/"([^"]+)"/);
 
-function extractImageUrl(product) {
-  const directKeys = [
-    "img",
-    "image",
-    "image_url",
-    "imageUrl",
-    "thumbnail",
-    "photo",
-    "photo_url",
-    "photoUrl"
-  ];
-
-  for (const key of directKeys) {
-    const value = product[key];
-    if (value) {
-      const normalized = normalizeImageUrl(value);
-      if (normalized) {
-        return normalized;
-      }
-    }
+  if (quoted && quoted[1]) {
+    return quoted[1].trim();
   }
 
-  if (Array.isArray(product.images)) {
-    for (const image of product.images) {
-      if (!image) {
-        continue;
-      }
-
-      if (typeof image === "string") {
-        const normalized = normalizeImageUrl(image);
-        if (normalized) {
-          return normalized;
-        }
-      }
-
-      if (typeof image === "object") {
-        const nested =
-          image.url ||
-          image.src ||
-          image.original ||
-          image.big ||
-          image.medium ||
-          image.small;
-
-        if (nested) {
-          const normalized = normalizeImageUrl(nested);
-          if (normalized) {
-            return normalized;
-          }
-        }
-      }
-    }
-  }
-
-  return "";
-}
-
-function extractCurrentPrice(product) {
-  const candidates = [
-    product.price,
-    product.current_price,
-    product.currentPrice,
-    product.sell_price,
-    product.sellPrice,
-    product.price_value,
-    product.priceValue,
-    product.discount_price,
-    product.discountPrice
-  ];
-
-  for (const candidate of candidates) {
-    const parsed = parsePrice(candidate);
-    if (parsed !== null) {
-      return parsed;
-    }
-  }
-
-  if (product.price && typeof product.price === "object") {
-    const nestedCandidates = [
-      product.price.value,
-      product.price.current,
-      product.price.amount,
-      product.price.price
-    ];
-
-    for (const candidate of nestedCandidates) {
-      const parsed = parsePrice(candidate);
-      if (parsed !== null) {
-        return parsed;
-      }
-    }
-  }
-
-  return null;
-}
-
-function extractOldPrice(product, currentPrice) {
-  const candidates = [
-    product.old_price,
-    product.oldPrice,
-    product.price_before_discount,
-    product.priceBeforeDiscount,
-    product.original_price,
-    product.originalPrice,
-    product.regular_price,
-    product.regularPrice,
-    product.compare_at_price,
-    product.compareAtPrice
-  ];
-
-  for (const candidate of candidates) {
-    const parsed = parsePrice(candidate);
-    if (parsed !== null) {
-      return parsed;
-    }
-  }
-
-  if (product.old_price && typeof product.old_price === "object") {
-    const nestedCandidates = [
-      product.old_price.value,
-      product.old_price.amount
-    ];
-
-    for (const candidate of nestedCandidates) {
-      const parsed = parsePrice(candidate);
-      if (parsed !== null) {
-        return parsed;
-      }
-    }
-  }
-
-  if (product.price && typeof product.price === "object") {
-    const nestedCandidates = [
-      product.price.old,
-      product.price.before_discount,
-      product.price.regular,
-      product.price.compare_at
-    ];
-
-    for (const candidate of nestedCandidates) {
-      const parsed = parsePrice(candidate);
-      if (parsed !== null) {
-        return parsed;
-      }
-    }
-  }
-
-  if (currentPrice !== null && currentPrice !== undefined) {
-    return currentPrice;
-  }
-
-  return null;
+  return safeTitle.split(" ")[0] || "";
 }
 
 function calculateDiscountPercent(price, oldPrice) {
@@ -373,8 +187,83 @@ function calculateDiscountPercent(price, oldPrice) {
   return Math.round(((oldPrice - price) / oldPrice) * 100);
 }
 
-function buildProductRecord(product, forcedCategory) {
-  const title = extractTitle(product);
+function extractServerAppState(html) {
+  const match = html.match(
+    /<script[^>]+id="serverApp-state"[^>]*type="application\/json"[^>]*>([\s\S]*?)<\/script>/i
+  );
+
+  if (!match || !match[1]) {
+    return null;
+  }
+
+  const rawJson = decodeHtmlEntities(match[1].trim());
+
+  try {
+    return JSON.parse(rawJson);
+  } catch (error) {
+    return null;
+  }
+}
+
+function collectItemsFromNode(node, collector) {
+  if (!node) {
+    return;
+  }
+
+  if (Array.isArray(node)) {
+    for (const item of node) {
+      collectItemsFromNode(item, collector);
+    }
+    return;
+  }
+
+  if (typeof node !== "object") {
+    return;
+  }
+
+  if (Array.isArray(node.items)) {
+    for (const item of node.items) {
+      if (item && typeof item === "object") {
+        collector.push(item);
+      }
+    }
+  }
+
+  for (const value of Object.values(node)) {
+    collectItemsFromNode(value, collector);
+  }
+}
+
+function extractItemsFromState(state) {
+  const collected = [];
+  collectItemsFromNode(state, collected);
+
+  const unique = new Map();
+
+  for (const item of collected) {
+    const rawId =
+      item.id ||
+      item.offerId ||
+      item.externalProductId ||
+      item.slug ||
+      item.title;
+
+    if (!rawId) {
+      continue;
+    }
+
+    const key = String(rawId).trim();
+
+    if (!unique.has(key)) {
+      unique.set(key, item);
+    }
+  }
+
+  return Array.from(unique.values());
+}
+
+function buildProductRecord(item, forcedCategory) {
+  const title = normalizeTitle(item.title || item.name || "");
   if (!title) {
     return null;
   }
@@ -386,12 +275,24 @@ function buildProductRecord(product, forcedCategory) {
     return null;
   }
 
-  const price = extractCurrentPrice(product);
+  const price = parsePrice(
+    item.displayPrice ??
+      item.price ??
+      item.currentPrice ??
+      item.display_price
+  );
+
   if (price === null || price <= 0) {
     return null;
   }
 
-  let oldPrice = extractOldPrice(product, price);
+  let oldPrice = parsePrice(
+    item.displayOldPrice ??
+      item.oldPrice ??
+      item.old_price ??
+      item.displayOld_price
+  );
+
   if (oldPrice === null || oldPrice <= 0) {
     oldPrice = price;
   }
@@ -400,16 +301,30 @@ function buildProductRecord(product, forcedCategory) {
     oldPrice = price;
   }
 
+  const imageUrl = normalizeImageUrl(
+    item.iconPath ||
+      item.image ||
+      item.imageUrl ||
+      item.photo ||
+      ""
+  );
+
   return {
-    id: extractId(product, title),
+    id: String(
+      item.id ||
+        item.offerId ||
+        item.externalProductId ||
+        item.slug ||
+        title
+    ).trim(),
     storeId: STORE_NUMERIC_ID,
     category,
-    brand: detectBrand(title, product),
+    brand: detectBrand(title, item),
     title,
     price,
     oldPrice,
     discountPercent: calculateDiscountPercent(price, oldPrice),
-    imageUrl: extractImageUrl(product),
+    imageUrl,
     createdAt: Date.now()
   };
 }
@@ -417,18 +332,25 @@ function buildProductRecord(product, forcedCategory) {
 async function searchProducts(query) {
   try {
     const response = await axios.get(BASE_URL, {
-      params: { q: query },
+      params: { find: query },
       timeout: 30000,
       headers: {
-        Accept: "application/json",
-        "User-Agent": "Mozilla/5.0 (compatible; SilpoZakazParser/1.0)"
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "User-Agent": "Mozilla/5.0 (compatible; SilpoHtmlParser/1.0)"
       }
     });
 
-    const payload = response.data || {};
-    const results = Array.isArray(payload.results) ? payload.results : [];
+    const html = String(response.data || "");
+    if (!html) {
+      return [];
+    }
 
-    return results;
+    const state = extractServerAppState(html);
+    if (!state) {
+      return [];
+    }
+
+    return extractItemsFromState(state);
   } catch (error) {
     console.error(`Silpo search error for query "${query}":`, error.message);
     return [];
@@ -440,7 +362,7 @@ async function getCategoryProducts(category) {
   const uniqueProducts = new Map();
 
   for (const query of queries) {
-    if (uniqueProducts.size >= 10) {
+    if (uniqueProducts.size >= LIMIT_PER_CATEGORY) {
       break;
     }
 
@@ -465,13 +387,13 @@ async function getCategoryProducts(category) {
         uniqueProducts.set(uniqueKey, builtProduct);
       }
 
-      if (uniqueProducts.size >= 10) {
+      if (uniqueProducts.size >= LIMIT_PER_CATEGORY) {
         break;
       }
     }
   }
 
-  return Array.from(uniqueProducts.values()).slice(0, 10);
+  return Array.from(uniqueProducts.values()).slice(0, LIMIT_PER_CATEGORY);
 }
 
 async function scrapeSilpo() {
