@@ -31,8 +31,10 @@ function detectBrand(title) {
 
 function normalizeImageUrl(url) {
   if (!url) return "";
+
   if (url.startsWith("//")) return `https:${url}`;
   if (url.startsWith("/")) return `https://klassmarket.ua${url}`;
+
   return url;
 }
 
@@ -94,7 +96,6 @@ async function scrapeKlass() {
     await autoScroll(page);
     await sleep(2500);
 
-    // беремо посилання на окремі акції
     const promoLinks = await page.evaluate(() => {
       const links = [...document.querySelectorAll("a[href]")];
 
@@ -106,7 +107,6 @@ async function scrapeKlass() {
             href.startsWith("https://klassmarket.ua/") &&
             !href.includes("/product/") &&
             !href.includes("/page/") &&
-            !href.includes("/kategoriya/") &&
             !href.includes("/tag/") &&
             href !== "https://klassmarket.ua/aktsii/" &&
             href !== "https://klassmarket.ua/aktsii"
@@ -135,8 +135,8 @@ async function scrapeKlass() {
               .trim();
           }
 
-          function getImg(el) {
-            const img = el.querySelector("img");
+          function getImg(card) {
+            const img = card.querySelector("img");
             if (!img) return "";
 
             return (
@@ -149,30 +149,28 @@ async function scrapeKlass() {
           }
 
           const result = [];
-          const cards = [...document.querySelectorAll("li.product, .product, .products li")];
+          const cards = document.querySelectorAll("li.product");
 
-          for (const card of cards) {
+          cards.forEach((card) => {
             const title =
               txt(card.querySelector(".woocommerce-loop-product__title")) ||
               txt(card.querySelector("h2")) ||
               txt(card.querySelector("h3")) ||
               txt(card.querySelector("a"));
 
-            const text = txt(card);
+            const priceBlock = txt(card.querySelector(".price"));
+            if (!title || !priceBlock) return;
 
-            const prices = text.match(/(\d[\d\s.,]*)\s*грн(?:\/\S+)?/gi);
-            if (!title || !prices || prices.length < 2) continue;
-
-            const oldPriceText = prices[0];
-            const priceText = prices[1];
+            const prices = priceBlock.match(/(\d[\d\s.,]*)/g);
+            if (!prices || prices.length < 2) return;
 
             result.push({
               title,
-              priceText,
-              oldPriceText,
+              priceText: prices[1],
+              oldPriceText: prices[0],
               imageUrl: getImg(card)
             });
-          }
+          });
 
           return result;
         });
@@ -225,7 +223,9 @@ async function scrapeKlass() {
       brand: detectBrand(item.title),
       price: item.price,
       oldPrice: item.oldPrice,
-      discountPercent: Math.round(((item.oldPrice - item.price) / item.oldPrice) * 100),
+      discountPercent: Math.round(
+        ((item.oldPrice - item.price) / item.oldPrice) * 100
+      ),
       imageUrl: item.imageUrl
     }));
 
