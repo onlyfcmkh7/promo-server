@@ -1,29 +1,65 @@
-async function scrapeVostorg() {
-  console.log("🚀 VOSTORG API");
+const puppeteer = require("puppeteer");
 
-  const url =
-    "https://vostorg.zakaz.ua/api/stores/48215685/products/?promo=1&page=1&page_size=100";
+const VOSTORG_URL = "https://vostorg.zakaz.ua/ru/custom-categories/promotions/";
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function scrapeVostorg() {
+  console.log("🚀 START VOSTORG INTERCEPT");
+
+  const browser = await puppeteer.launch({
+    headless: "new",
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage"
+    ]
+  });
 
   try {
-    const res = await fetch(url, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-        "Accept": "application/json",
-        "Referer": "https://vostorg.zakaz.ua/"
-      }
+    const page = await browser.newPage();
+
+    let apiData = null;
+
+    await page.setUserAgent(
+      "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    );
+
+    page.on("response", async (response) => {
+      try {
+        const url = response.url();
+        const contentType = response.headers()["content-type"] || "";
+
+        if (
+          url.includes("/api/") &&
+          url.includes("/products") &&
+          url.includes("promo") &&
+          contentType.includes("application/json")
+        ) {
+          const json = await response.json();
+          if (json && json.results && Array.isArray(json.results)) {
+            apiData = json;
+            console.log("✅ VOSTORG API CAUGHT:", json.results.length);
+          }
+        }
+      } catch (_) {}
     });
 
-    const text = await res.text();
+    await page.goto(VOSTORG_URL, {
+      waitUntil: "networkidle2",
+      timeout: 60000
+    });
 
-    if (!text || text.startsWith("<")) {
-      console.log("❌ VOSTORG BLOCKED");
+    await sleep(5000);
+
+    if (!apiData || !apiData.results) {
+      console.log("❌ NO VOSTORG API DATA");
       return [];
     }
 
-    const data = JSON.parse(text);
-
-    const items = (data.results || [])
+    const items = apiData.results
       .map((item, i) => {
         const price = item.price;
         const oldPrice = item.old_price;
@@ -45,12 +81,11 @@ async function scrapeVostorg() {
       })
       .filter(Boolean);
 
-    console.log("✅ VOSTORG:", items.length);
+    console.log("✅ FINAL VOSTORG:", items.length);
 
     return items;
-  } catch (e) {
-    console.error("❌ VOSTORG ERROR:", e);
-    return [];
+  } finally {
+    await browser.close();
   }
 }
 
