@@ -5,6 +5,7 @@ const { scrapeATB } = require("./parsers/atb");
 const { scrapeSilpo } = require("./parsers/silpo");
 const { scrapeMetro } = require("./parsers/metro");
 const { scrapeKlass } = require("./parsers/klass");
+const { scrapeVostorg } = require("./parsers/vostorg");
 
 const app = express();
 app.use(cors());
@@ -17,7 +18,7 @@ app.get("/promotions/atb", async (_req, res) => {
     const data = await scrapeATB();
     res.json(data);
   } catch (e) {
-    console.error(e);
+    console.error("ATB ERROR:", e);
     res.status(500).json({ error: "fail" });
   }
 });
@@ -28,7 +29,7 @@ app.get("/promotions/silpo", async (_req, res) => {
     const data = await scrapeSilpo();
     res.json(data);
   } catch (e) {
-    console.error(e);
+    console.error("SILPO ERROR:", e);
     res.status(500).json({ error: "fail" });
   }
 });
@@ -51,6 +52,17 @@ app.get("/promotions/klass", async (_req, res) => {
     res.json(data);
   } catch (e) {
     console.error("KLASS ERROR:", e);
+    res.status(500).json({ error: "fail" });
+  }
+});
+
+// 🟣 VOSTORG
+app.get("/promotions/vostorg", async (_req, res) => {
+  try {
+    const data = await scrapeVostorg();
+    res.json(data);
+  } catch (e) {
+    console.error("VOSTORG ERROR:", e);
     res.status(500).json({ error: "fail" });
   }
 });
