@@ -13,72 +13,53 @@ app.use(cors());
 
 const PORT = process.env.PORT || 3000;
 
-// 🔵 ATB
-app.get("/promotions/atb", async (_req, res) => {
+// універсальний хелпер
+async function handle(res, fn, name) {
   try {
-    const data = await scrapeATB();
+    const data = await fn();
     res.json(data);
   } catch (e) {
-    console.error("ATB ERROR:", e);
+    console.error(`${name} ERROR:`, e.message);
     res.status(500).json({ error: "fail" });
   }
+}
+
+// 🔵 ATB
+app.get("/promotions/atb", async (_req, res) => {
+  await handle(res, scrapeATB, "ATB");
 });
 
 // 🟢 SILPO
 app.get("/promotions/silpo", async (_req, res) => {
-  try {
-    const data = await scrapeSilpo();
-    res.json(data);
-  } catch (e) {
-    console.error("SILPO ERROR:", e);
-    res.status(500).json({ error: "fail" });
-  }
+  await handle(res, scrapeSilpo, "SILPO");
 });
 
 // 🟡 METRO
 app.get("/promotions/metro", async (_req, res) => {
-  try {
-    const data = await scrapeMetro();
-    res.json(data);
-  } catch (e) {
-    console.error("METRO ERROR:", e);
-    res.status(500).json({ error: "fail" });
-  }
+  await handle(res, scrapeMetro, "METRO");
 });
 
 // 🔴 KLASS
 app.get("/promotions/klass", async (_req, res) => {
-  try {
-    const data = await scrapeKlass();
-    res.json(data);
-  } catch (e) {
-    console.error("KLASS ERROR:", e);
-    res.status(500).json({ error: "fail" });
-  }
+  await handle(res, scrapeKlass, "KLASS");
 });
 
-// 🟣 VOSTORG
-app.get("/promotions/vostorg", async (_req, res) => {
-  try {
-    const data = await scrapeVostorg();
-    res.json(data);
-  } catch (e) {
-    console.error("VOSTORG ERROR:", e);
-    res.status(500).json({ error: "fail" });
-  }
+// 🟣 VOSTORG (з query)
+app.get("/promotions/vostorg", async (req, res) => {
+  const q = req.query.q || "молоко";
+
+  await handle(
+    res,
+    () => scrapeVostorg(q),
+    "VOSTORG"
+  );
 });
 
 // 🟠 ROST
 app.get("/promotions/rost", async (_req, res) => {
-  try {
-    const data = await scrapeRost();
-    res.json(data);
-  } catch (e) {
-    console.error("ROST ERROR:", e);
-    res.status(500).json({ error: "fail" });
-  }
+  await handle(res, scrapeRost, "ROST");
 });
 
 app.listen(PORT, () => {
-  console.log("Server running on", PORT);
+  console.log("🚀 Server running on", PORT);
 });
