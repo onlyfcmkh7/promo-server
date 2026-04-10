@@ -112,6 +112,13 @@ async function scrapeSilpo() {
           .trim();
       }
 
+      function normalizeTitle(value) {
+        return String(value || "")
+          .replace(/\s+/g, " ")
+          .replace(/\s+-\s+\d+$/, "")
+          .trim();
+      }
+
       function isBadAlt(alt) {
         const value = String(alt || "").trim().toLowerCase();
 
@@ -124,10 +131,34 @@ async function scrapeSilpo() {
           "national-cashback",
           "cinotyzhyky",
           "цінодіжики",
+          "cinodidjiky",
           "katalogh-asortyment",
           "velykden",
           "melkoopt"
         ].includes(value);
+      }
+
+      function isBadTitle(title) {
+        const value = normalizeTitle(title);
+        const lower = value.toLowerCase();
+
+        if (!value) return true;
+        if (value.length < 5) return true;
+        if (!/[а-яіїєґa-z0-9]/i.test(value)) return true;
+
+        if (isBadAlt(lower)) return true;
+
+        if (
+          [
+            "rose mojito",
+            "rose spritz",
+            "redberry spritz"
+          ].includes(lower)
+        ) {
+          return true;
+        }
+
+        return false;
       }
 
       function getProductImage(card) {
@@ -147,8 +178,12 @@ async function scrapeSilpo() {
 
       function getProductTitle(card) {
         const imgs = [...card.querySelectorAll("img[alt]")];
-        const img = imgs.find((item) => !isBadAlt(item.getAttribute("alt")));
-        return img ? String(img.getAttribute("alt") || "").trim() : "";
+        const img = imgs.find((item) => {
+          const alt = item.getAttribute("alt");
+          return !isBadAlt(alt) && !isBadTitle(alt);
+        });
+
+        return img ? normalizeTitle(img.getAttribute("alt")) : "";
       }
 
       function findCard(el) {
@@ -176,7 +211,7 @@ async function scrapeSilpo() {
         if (!card) continue;
 
         const title = getProductTitle(card);
-        if (!title || isBadAlt(title) || title.length < 5) continue;
+        if (isBadTitle(title)) continue;
 
         const imageUrl = getProductImage(card);
         if (!imageUrl) continue;
