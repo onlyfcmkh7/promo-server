@@ -13,13 +13,86 @@ function normalizeImage(url) {
   return url;
 }
 
+function detectCategory(title) {
+  const t = String(title || "").toLowerCase();
+
+  if (/\b(молоко|кефір|ряжанка|йогурт|сир|творог|кисломолочн|сметан|вершк|масло\b|моцарел|бринз|фет[аи]?|гауд|чедер|пармезан|маскарпоне|рікот|айран|крем-сир)\b/i.test(t)) {
+    return "dairy";
+  }
+
+  if (/\b(хліб|батон|багет|лаваш|булочк|чіабат|бріош|тостов|паляниц|круасан|паск|панеттоне|кекс|тістечко|чизкейк)\b/i.test(t)) {
+    return "bread";
+  }
+
+  if (/\b(курк|куряч|філе кур|стегно кур|гомілка кур|крило кур|стріпс)\b/i.test(t)) {
+    return "chicken";
+  }
+
+  if (/\b(свинин|свиняч|ошийок|ребра свин|лопатка свин|корейка свин|голубці зі свининою)\b/i.test(t)) {
+    return "pork";
+  }
+
+  if (/\b(телятина|теляч|теляче|ялович)\b/i.test(t)) {
+    return "veal";
+  }
+
+  if (/\b(риба|лосос|форел|оселед|скумбр|тунец|тунець|хек|минтай|дорадо|сибас|короп)\b/i.test(t)) {
+    return "fish";
+  }
+
+  if (/\b(кревет|міді|миді|кальмар|морепродукт|восьмин|лангустин|рапан)\b/i.test(t)) {
+    return "seafood";
+  }
+
+  if (/\b(соус|кетчуп|майонез|гірчиц|гірчичн|теріякі|барбекю|bbq|песто|сацебелі|аджика|соєвий)\b/i.test(t)) {
+    return "sauces";
+  }
+
+  if (/\b(олія|оливкова олія|соняшникова олія|кукурудзяна олія|рапсова олія|масло оливкове)\b/i.test(t)) {
+    return "oil";
+  }
+
+  if (/\b(шоколад|шоколадка|chocolate)\b/i.test(t)) {
+    return "chocolate";
+  }
+
+  if (/\b(вода|мінеральна вода|газована вода|негазована вода|питна вода)\b/i.test(t)) {
+    return "water";
+  }
+
+  if (/\b(пиво|lager|ale|stout|ipa|porter|пшеничне пиво)\b/i.test(t)) {
+    return "beer";
+  }
+
+  if (/\b(сидр|слабоалкоголь|hard seltzer|алкогольний коктейль|коктейль алкогольний|соджу)\b/i.test(t)) {
+    return "low_alcohol";
+  }
+
+  if (/\b(горілка|віскі|коньяк|ром|джин|текіла|бренді|лікер|настоянка|бурбон)\b/i.test(t)) {
+    return "strong_alcohol";
+  }
+
+  return "other";
+}
+
+function detectBrand(title) {
+  const safeTitle = String(title || "").trim();
+  const quoted = safeTitle.match(/[«"]([^"»]+)[»"]/);
+
+  if (quoted && quoted[1]) {
+    return quoted[1].trim();
+  }
+
+  return safeTitle.split(" ")[0] || "";
+}
+
 async function acceptCookies(page) {
   const buttons = await page.$$("button, a, [role='button']");
 
   for (const btn of buttons) {
     try {
       const text = await page.evaluate(
-        el => (el.innerText || "").trim(),
+        (el) => (el.innerText || "").trim(),
         btn
       );
 
@@ -28,13 +101,13 @@ async function acceptCookies(page) {
         await sleep(1000);
         return;
       }
-    } catch {}
+    } catch (_) {}
   }
 }
 
 async function autoScroll(page) {
   await page.evaluate(async () => {
-    await new Promise(resolve => {
+    await new Promise((resolve) => {
       let total = 0;
       const step = 800;
       let idle = 0;
@@ -97,7 +170,6 @@ async function scrapeSilpo() {
     await acceptCookies(page);
     await sleep(1000);
 
-    // чекаємо поки з’являться ціни
     await page.waitForFunction(
       () => /грн|₴/i.test(document.body?.innerText || ""),
       { timeout: 20000 }
@@ -182,16 +254,26 @@ async function scrapeSilpo() {
       return result;
     });
 
-    const normalized = items.map(i => ({
-      ...i,
-      imageUrl: normalizeImage(i.imageUrl)
+    const normalized = items.map((item, index) => ({
+      id: String(index + 1),
+      storeId: 2,
+      title: item.title,
+      category: detectCategory(item.title),
+      brand: detectBrand(item.title),
+      price: item.price,
+      oldPrice: item.oldPrice,
+      discountPercent:
+        item.oldPrice && item.oldPrice > item.price
+          ? Math.round(((item.oldPrice - item.price) / item.oldPrice) * 100)
+          : null,
+      createdAt: Date.now(),
+      imageUrl: normalizeImage(item.imageUrl)
     }));
 
     console.log("✅ SILPO ITEMS:", normalized.length);
     console.log("SAMPLE:", JSON.stringify(normalized.slice(0, 5), null, 2));
 
     return normalized;
-
   } catch (e) {
     console.error("❌ SILPO ERROR:", e.message);
     return [];
