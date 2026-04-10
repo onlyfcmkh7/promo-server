@@ -9,51 +9,38 @@ const { scrapeVostorg } = require("./parsers/vostorg");
 const { scrapeRost } = require("./parsers/rost");
 
 const app = express();
+
 app.use(cors());
 app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
 const CACHE_TTL_MS = 30 * 60 * 1000;
 
-const cache = {
-  atb: { items: [], updatedAt: null, loading: false, error: null },
-  silpo: { items: [], updatedAt: null, loading: false, error: null },
-  metro: { items: [], updatedAt: null, loading: false, error: null },
-  klass: { items: [], updatedAt: null, loading: false, error: null },
-  vostorg: { items: [], updatedAt: null, loading: false, error: null },
-  rost: { items: [], updatedAt: null, loading: false, error: null }
+const stores = {
+  atb: { name: "ATB", scraper: scrapeATB },
+  silpo: { name: "SILPO", scraper: scrapeSilpo },
+  metro: { name: "METRO", scraper: scrapeMetro },
+  klass: { name: "KLASS", scraper: scrapeKlass },
+  vostorg: { name: "VOSTORG", scraper: scrapeVostorg },
+  rost: { name: "ROST", scraper: scrapeRost }
 };
+
+const cache = Object.fromEntries(
+  Object.keys(stores).map((key) => [
+    key,
+    {
+      items: [],
+      updatedAt: null,
+      loading: false,
+      error: null,
+      lastAttemptAt: null
+    }
+  ])
+);
 
 function isFresh(entry) {
   if (!entry.updatedAt) return false;
   return Date.now() - new Date(entry.updatedAt).getTime() < CACHE_TTL_MS;
-}
-
-async function refreshStore(key, fn, name) {
-  const entry = cache[key];
-
-  if (entry.loading) {
-    console.log(`⏳ ${name} refresh skipped: already loading`);
-    return;
-  }
-
-  entry.loading = true;
-  entry.error = null;
-
-  try {
-    console.log(`🔄 ${name} refresh start`);
-    const items = await fn();
-
-    entry.items = Array.isArray(items) ? items : [];
-    entry.updatedAt = new Date().toISOString();
-
-    console.log(`✅ ${name} refresh done:`, entry.items.length);
-  } catch (e) {
-    entry.error = e.message;
-    console.error(`❌ ${name} refresh error:`, e.message);
-  } finally {
-    entry.loading = false;
-  }
 }
 
 function buildResponse(entry) {
@@ -66,46 +53,93 @@ function buildResponse(entry) {
   };
 }
 
-function makeCachedRoute(key, fn, name) {
-  return async (_req, res) => {
-    const entry = cache[key];
+async function refreshStore(key) {
+  const store = stores[key];
+  const entry = cache[key];
 
-    if (!isFresh(entry) && !entry.loading) {
-      refreshStore(key, fn, name).catch((e) => {
-        console.error(`${name} background refresh error:`, e.message);
-      });
+  if (!store) {
+    throw new Error(`Unknown store: ${key}`);
+  }
+
+  if (entry.loading) {
+    console.log(`⏳ ${store.name} refresh skipped: already loading`);
+    return entry.items;
+  }
+
+  entry.loading = true;
+  entry.error = null;
+  entry.lastAttemptAt = new Date().toISOString();
+
+  try {
+    console.log(`🔄 ${store.name} refresh start`);
+
+    const items = await store.scraper();
+
+    if (!Array.isArray(items)) {
+      throw new Error(`${store.name} scraper returned invalid data`);
     }
 
-    return res.json(buildResponse(entry));
-  };
+    if (items.length > 0) {
+      entry.items = items;
+      entry.updatedAt = new Date().toISOString();
+      console.log(`✅ ${store.name} refresh done: ${items.length}`);
+    } else {
+      console.log(`⚠️ ${store.name} returned 0 items, keeping previous cache`);
+    }
+
+    return entry.items;
+  } catch (e) {
+    entry.error = e.message;
+    console.error(`❌ ${store.name} refresh error:`, e.message);
+    return entry.items;
+  } finally {
+    entry.loading = false;
+  }
 }
 
-function makeRefreshRoute(key, fn, name) {
+function triggerRefreshIfNeeded(key) {
+  const entry = cache[key];
+
+  if (!isFresh(entry) && !entry.loading) {
+    refreshStore(key).catch((e) => {
+      console.error(`${stores[key].name} background refresh error:`, e.message);
+    });
+  }
+}
+
+function createCachedRoute(key) {
   return async (_req, res) => {
-    refreshStore(key, fn, name).catch((e) => {
-      console.error(`${name} manual refresh error:`, e.message);
+    triggerRefreshIfNeeded(key);
+    res.json(buildResponse(cache[key]));
+  };
+}
+
+function createManualRefreshRoute(key) {
+  return async (_req, res) => {
+    refreshStore(key).catch((e) => {
+      console.error(`${stores[key].name} manual refresh error:`, e.message);
     });
 
-    return res.json({
+    res.json({
       ok: true,
-      message: `${name} refresh started`
+      message: `${stores[key].name} refresh started`
     });
   };
 }
 
-app.get("/promotions/atb", makeCachedRoute("atb", scrapeATB, "ATB"));
-app.get("/promotions/silpo", makeCachedRoute("silpo", scrapeSilpo, "SILPO"));
-app.get("/promotions/metro", makeCachedRoute("metro", scrapeMetro, "METRO"));
-app.get("/promotions/klass", makeCachedRoute("klass", scrapeKlass, "KLASS"));
-app.get("/promotions/vostorg", makeCachedRoute("vostorg", scrapeVostorg, "VOSTORG"));
-app.get("/promotions/rost", makeCachedRoute("rost", scrapeRost, "ROST"));
+app.get("/promotions/atb", createCachedRoute("atb"));
+app.get("/promotions/silpo", createCachedRoute("silpo"));
+app.get("/promotions/metro", createCachedRoute("metro"));
+app.get("/promotions/klass", createCachedRoute("klass"));
+app.get("/promotions/vostorg", createCachedRoute("vostorg"));
+app.get("/promotions/rost", createCachedRoute("rost"));
 
-app.post("/promotions/atb/refresh", makeRefreshRoute("atb", scrapeATB, "ATB"));
-app.post("/promotions/silpo/refresh", makeRefreshRoute("silpo", scrapeSilpo, "SILPO"));
-app.post("/promotions/metro/refresh", makeRefreshRoute("metro", scrapeMetro, "METRO"));
-app.post("/promotions/klass/refresh", makeRefreshRoute("klass", scrapeKlass, "KLASS"));
-app.post("/promotions/vostorg/refresh", makeRefreshRoute("vostorg", scrapeVostorg, "VOSTORG"));
-app.post("/promotions/rost/refresh", makeRefreshRoute("rost", scrapeRost, "ROST"));
+app.post("/promotions/atb/refresh", createManualRefreshRoute("atb"));
+app.post("/promotions/silpo/refresh", createManualRefreshRoute("silpo"));
+app.post("/promotions/metro/refresh", createManualRefreshRoute("metro"));
+app.post("/promotions/klass/refresh", createManualRefreshRoute("klass"));
+app.post("/promotions/vostorg/refresh", createManualRefreshRoute("vostorg"));
+app.post("/promotions/rost/refresh", createManualRefreshRoute("rost"));
 
 app.get("/health", (_req, res) => {
   res.json({
@@ -117,73 +151,32 @@ app.get("/health", (_req, res) => {
           updatedAt: entry.updatedAt,
           loading: entry.loading,
           count: entry.items.length,
-          error: entry.error
+          error: entry.error,
+          lastAttemptAt: entry.lastAttemptAt
         }
       ])
     )
   });
 });
 
-app.listen(PORT, async () => {
+app.listen(PORT, () => {
   console.log("🚀 Server running on", PORT);
 
-  refreshStore("silpo", scrapeSilpo, "SILPO").catch((e) => {
+  // Прогріваємо тільки Silpo на старті, не валимо Railway шістьма браузерами одразу
+  refreshStore("silpo").catch((e) => {
     console.error("SILPO initial refresh error:", e.message);
   });
 
-  refreshStore("atb", scrapeATB, "ATB").catch((e) => {
-    console.error("ATB initial refresh error:", e.message);
-  });
-
-  refreshStore("metro", scrapeMetro, "METRO").catch((e) => {
-    console.error("METRO initial refresh error:", e.message);
-  });
-
-  refreshStore("klass", scrapeKlass, "KLASS").catch((e) => {
-    console.error("KLASS initial refresh error:", e.message);
-  });
-
-  refreshStore("vostorg", scrapeVostorg, "VOSTORG").catch((e) => {
-    console.error("VOSTORG initial refresh error:", e.message);
-  });
-
-  refreshStore("rost", scrapeRost, "ROST").catch((e) => {
-    console.error("ROST initial refresh error:", e.message);
-  });
-
+  // Періодичне оновлення тільки тих, що вже були запитані або мають кеш
   setInterval(() => {
-    refreshStore("silpo", scrapeSilpo, "SILPO").catch((e) => {
-      console.error("SILPO interval refresh error:", e.message);
-    });
-  }, CACHE_TTL_MS);
+    for (const key of Object.keys(stores)) {
+      const entry = cache[key];
 
-  setInterval(() => {
-    refreshStore("atb", scrapeATB, "ATB").catch((e) => {
-      console.error("ATB interval refresh error:", e.message);
-    });
-  }, CACHE_TTL_MS);
-
-  setInterval(() => {
-    refreshStore("metro", scrapeMetro, "METRO").catch((e) => {
-      console.error("METRO interval refresh error:", e.message);
-    });
-  }, CACHE_TTL_MS);
-
-  setInterval(() => {
-    refreshStore("klass", scrapeKlass, "KLASS").catch((e) => {
-      console.error("KLASS interval refresh error:", e.message);
-    });
-  }, CACHE_TTL_MS);
-
-  setInterval(() => {
-    refreshStore("vostorg", scrapeVostorg, "VOSTORG").catch((e) => {
-      console.error("VOSTORG interval refresh error:", e.message);
-    });
-  }, CACHE_TTL_MS);
-
-  setInterval(() => {
-    refreshStore("rost", scrapeRost, "ROST").catch((e) => {
-      console.error("ROST interval refresh error:", e.message);
-    });
+      if (entry.updatedAt || entry.items.length > 0) {
+        refreshStore(key).catch((e) => {
+          console.error(`${stores[key].name} interval refresh error:`, e.message);
+        });
+      }
+    }
   }, CACHE_TTL_MS);
 });
