@@ -73,34 +73,32 @@ function isTrashTitle(title) {
   const value = normalizeTitle(title).toLowerCase();
 
   if (!value) return true;
-  if (value.length < 6) return true;
+  if (value.length < 4) return true;
 
-  if (
-    [
-      "facebook",
-      "instagram",
-      "telegram",
-      "viber",
-      "facebook bot",
-      "header logo",
-      "silpo logo",
-      "logo",
-      "cinotyzhyky",
-      "katalogh-asortyment",
-      "цінотижики",
-      "каталог асортимент",
-      "melkoopt",
-      "only_online",
-      "new"
-    ].includes(value)
-  ) {
-    return true;
-  }
+  const exactBad = new Set([
+    "facebook",
+    "instagram",
+    "telegram",
+    "viber",
+    "facebook bot",
+    "header logo",
+    "silpo logo",
+    "logo",
+    "cinotyzhyky",
+    "katalogh-asortyment",
+    "цінотижики",
+    "каталог асортимент",
+    "melkoopt",
+    "only_online",
+    "new",
+    "акції"
+  ]);
 
-  if (/^[a-z0-9_-]+$/i.test(value) && !/\s/.test(value)) {
-    return true;
-  }
-
+  if (exactBad.has(value)) return true;
+  if (/^[a-z0-9_-]+$/i.test(value) && !/\s/.test(value)) return true;
+  if (/^\d+(г|кг|мл|л|шт)$/i.test(value)) return true;
+  if (/^\d+([.,]\d+)?\s*(\/5)?$/i.test(value)) return true;
+  if (/^\d+(г|кг|мл|л)\s+\d+([.,]\d+)?$/i.test(value)) return true;
   if (/facebook|instagram|telegram|viber|logo|цінотижики|only_online|melkoopt/i.test(value)) {
     return true;
   }
@@ -225,53 +223,6 @@ async function waitForPrices(page) {
   }
 }
 
-async function debugDom(page) {
-  const info = await page.evaluate(() => {
-    function text(node) {
-      return String(node?.innerText || node?.textContent || "")
-        .replace(/\s+/g, " ")
-        .trim();
-    }
-
-    const allLinks = Array.from(document.querySelectorAll("a"));
-    const allArticles = Array.from(document.querySelectorAll("article"));
-    const allDivs = Array.from(document.querySelectorAll("div"));
-    const allImgs = Array.from(document.querySelectorAll("img"));
-
-    const linksWithMoney = allLinks
-      .map((el) => text(el))
-      .filter((t) => /\d[\d\s.,]{0,20}\s*(грн|₴)/i.test(t))
-      .slice(0, 10);
-
-    const articlesWithMoney = allArticles
-      .map((el) => text(el))
-      .filter((t) => /\d[\d\s.,]{0,20}\s*(грн|₴)/i.test(t))
-      .slice(0, 10);
-
-    const divsWithMoney = allDivs
-      .map((el) => text(el))
-      .filter((t) => /\d[\d\s.,]{0,20}\s*(грн|₴)/i.test(t))
-      .slice(0, 10);
-
-    return {
-      url: location.href,
-      title: document.title,
-      bodyHasMoney: /\d[\d\s.,]{0,20}\s*(грн|₴)/i.test(document.body?.innerText || ""),
-      counts: {
-        a: allLinks.length,
-        article: allArticles.length,
-        div: allDivs.length,
-        img: allImgs.length
-      },
-      linksWithMoney,
-      articlesWithMoney,
-      divsWithMoney
-    };
-  });
-
-  console.log("SILPO DEBUG DOM:", JSON.stringify(info, null, 2));
-}
-
 async function extractOfferItems(page) {
   return page.evaluate(() => {
     function text(node) {
@@ -302,35 +253,8 @@ async function extractOfferItems(page) {
       return /\d[\d\s.,]{0,20}\s*(грн|₴)/i.test(String(value || ""));
     }
 
-    function isWeight(value) {
-      return /^\d+([.,]\d+)?\s?(г|кг|мл|л|шт)$/i.test(normalize(value));
-    }
-
-    function isDiscount(value) {
-      return /^-\d+%$/i.test(normalize(value));
-    }
-
-    function isRating(value) {
-      const v = normalize(value);
-      return /^★\s?\d([.,]\d)?$/i.test(v) || /^\d([.,]\d)?$/i.test(v);
-    }
-
-    function isBadTitle(value) {
-      const v = normalize(value);
-
-      if (!v) return true;
-      if (v.length < 6) return true;
-      if (hasMoney(v)) return true;
-      if (isWeight(v)) return true;
-      if (isDiscount(v)) return true;
-      if (isRating(v)) return true;
-      if (/^only_online$/i.test(v)) return true;
-      if (/^melkoopt$/i.test(v)) return true;
-      if (/^new$/i.test(v)) return true;
-      if (/^[a-z0-9_-]+$/i.test(v) && !/\s/.test(v)) return true;
-      if (/facebook|instagram|telegram|viber|logo|цінотижики/i.test(v)) return true;
-
-      return false;
+    function isWeightToken(value) {
+      return /^\d+(?:[.,]\d+)?\s?(г|кг|мл|л|шт)$/i.test(normalize(value));
     }
 
     function getImageUrl(node) {
@@ -344,64 +268,147 @@ async function extractOfferItems(page) {
       );
     }
 
-    function getLines(scope) {
-      return Array.from(scope.querySelectorAll("div, span, p, a, h2, h3, h4, h5"))
-        .map((el) => normalize(text(el)))
-        .filter(Boolean)
-        .filter((v) => v.length <= 200);
+    function getBestProductImage(node) {
+      const images = Array.from(node.querySelectorAll("img"));
+
+      for (const img of images) {
+        const src = getImageUrl(img);
+        if (/images\.silpo\.ua/i.test(src)) {
+          return src;
+        }
+      }
+
+      for (const img of images) {
+        const src = getImageUrl(img);
+        if (
+          /silpo\.ua/i.test(src) &&
+          !/MediaBubbles|Activities|site\.svg|hermes/i.test(src)
+        ) {
+          return src;
+        }
+      }
+
+      return "";
     }
 
     function getPriceValues(scope) {
-      const lines = getLines(scope);
-      const priceLines = lines.filter((v) => /^\d[\d\s.,]{0,20}\s*(грн|₴)$/i.test(v));
+      const full = normalize(text(scope));
 
-      return Array.from(
-        new Set(
-          priceLines
-            .map(parseLocalPrice)
-            .filter((v) => v !== null && v > 0)
-        )
+      const matches = Array.from(
+        full.matchAll(/(\d[\d\s.,]{0,20})\s*(грн|₴)/gi)
+      ).map((m) => parseLocalPrice(m[1]));
+
+      const numeric = Array.from(
+        new Set(matches.filter((v) => v !== null && v > 0))
       ).sort((a, b) => a - b);
+
+      if (!numeric.length) {
+        return { price: null, oldPrice: null };
+      }
+
+      return {
+        price: numeric[0],
+        oldPrice: numeric.length > 1 ? numeric[numeric.length - 1] : numeric[0]
+      };
     }
 
-    const candidates = Array.from(document.querySelectorAll("a, article, li, section, div"));
+    function cleanupTitle(value) {
+      return normalize(value)
+        .replace(/^\-\s*\d+%\s*/i, "")
+        .replace(/\s+\d+(?:[.,]\d+)?\s?(г|кг|мл|л|шт)\s+\d+(?:[.,]\d+)?(?:\s*\/5)?$/i, "")
+        .replace(/\s+\d+(?:[.,]\d+)?\s?(г|кг|мл|л|шт)$/i, "")
+        .trim();
+    }
+
+    function extractTitle(card) {
+      const full = normalize(text(card));
+
+      const patterns = [
+        /-\s*\d+%\s+(.+?)\s+\d+(?:[.,]\d+)?\s?(г|кг|мл|л|шт)\s+\d+(?:[.,]\d+)?(?:\s*\/5)?/i,
+        /-\s*\d+%\s+(.+?)\s+\d+(?:[.,]\d+)?\s?(г|кг|мл|л|шт)/i,
+        /(?:грн|₴)\s+Роздріб\s+\d[\d\s.,]*\s*(?:грн|₴)\s+від\s+\d+\s+шт\s+(.+?)\s+\d+(?:[.,]\d+)?\s?(г|кг|мл|л|шт)\s+\d+(?:[.,]\d+)?(?:\s*\/5)?/i,
+        /(?:грн|₴)\s+Роздріб\s+\d[\d\s.,]*\s*(?:грн|₴)\s+від\s+\d+\s+шт\s+(.+?)\s+\d+(?:[.,]\d+)?\s?(г|кг|мл|л|шт)/i,
+        /\d[\d\s.,]*\s*(?:грн|₴)\s+\d[\d\s.,]*\s*(?:грн|₴)\s+(.+?)\s+\d+(?:[.,]\d+)?\s?(г|кг|мл|л|шт)\s+\d+(?:[.,]\d+)?(?:\s*\/5)?/i,
+        /\d[\d\s.,]*\s*(?:грн|₴)\s+\d[\d\s.,]*\s*(?:грн|₴)\s+(.+?)\s+\d+(?:[.,]\d+)?\s?(г|кг|мл|л|шт)/i
+      ];
+
+      for (const pattern of patterns) {
+        const match = full.match(pattern);
+        if (match && match[1]) {
+          const cleaned = cleanupTitle(match[1]);
+          if (cleaned) {
+            return cleaned;
+          }
+        }
+      }
+
+      const lines = Array.from(card.querySelectorAll("div, span, p, a, h2, h3, h4, h5"))
+        .map((el) => normalize(text(el)))
+        .filter(Boolean);
+
+      const candidates = lines
+        .filter((line) => {
+          if (!line) return false;
+          if (hasMoney(line)) return false;
+          if (isWeightToken(line)) return false;
+          if (/^\d+([.,]\d+)?(?:\s*\/5)?$/i.test(line)) return false;
+          if (/^\-\s*\d+%$/i.test(line)) return false;
+          if (/^роздріб$/i.test(line)) return false;
+          if (/^від\s+\d+\s+шт$/i.test(line)) return false;
+          if (/^\d+(г|кг|мл|л)\s+\d+([.,]\d+)?$/i.test(line)) return false;
+          return true;
+        })
+        .map(cleanupTitle)
+        .filter((line) => line && line.length >= 5)
+        .filter((line) => !/^[a-z0-9_-]+$/i.test(line));
+
+      candidates.sort((a, b) => b.length - a.length);
+      return candidates[0] || "";
+    }
+
+    function isProbablyProductCard(node) {
+      if (!node) return false;
+
+      const fullText = text(node);
+      if (!hasMoney(fullText)) return false;
+
+      const img = getBestProductImage(node);
+      if (!img) return false;
+
+      const prices = getPriceValues(node);
+      if (!prices.price) return false;
+
+      const title = extractTitle(node);
+      if (!title) return false;
+
+      return true;
+    }
+
+    const candidates = Array.from(document.querySelectorAll("a, article, li"));
     const result = [];
     const seen = new Set();
 
     for (const node of candidates) {
-      const fullText = text(node);
-      if (!hasMoney(fullText)) continue;
+      if (!isProbablyProductCard(node)) continue;
 
-      const img = node.querySelector("img");
-      if (!img) continue;
+      const { price, oldPrice } = getPriceValues(node);
+      const title = extractTitle(node);
+      const imageUrl = getBestProductImage(node);
 
-      const prices = getPriceValues(node);
-      if (!prices.length) continue;
-      if (prices.length > 3) continue;
-
-      const lines = getLines(node);
-      const titleCandidates = lines.filter((v) => !isBadTitle(v));
-
-      const title = titleCandidates
-        .filter((v) => v.split(/\s+/).length >= 2)
-        .sort((a, b) => a.length - b.length)[0];
-
-      if (!title) continue;
-
-      const price = prices[0];
-      const oldPrice = prices.length > 1 ? prices[prices.length - 1] : price;
-
-      const imageUrl = getImageUrl(img);
+      if (!title || !price || !imageUrl) continue;
 
       const key = `${title.toLowerCase()}|${price}|${oldPrice}`;
       if (seen.has(key)) continue;
       seen.add(key);
 
+      const fullText = normalize(text(node));
+      const discountMatch = fullText.match(/-\s*(\d+)%/i);
+
       result.push({
         title,
         price,
         oldPrice,
-        discountPercent: null,
+        discountPercent: discountMatch ? Number(discountMatch[1]) : null,
         imageUrl
       });
     }
@@ -510,8 +517,6 @@ async function scrapeSilpo() {
 
     const hasPrices = await waitForPrices(page);
     console.log("SILPO HAS PRICES:", hasPrices);
-
-    await debugDom(page);
 
     const rawItems = await extractOfferItems(page);
 
