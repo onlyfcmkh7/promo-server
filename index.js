@@ -32,8 +32,7 @@ const cache = Object.fromEntries(
       items: [],
       updatedAt: null,
       loading: false,
-      error: null,
-      lastAttemptAt: null
+      error: null
     }
   ])
 );
@@ -41,16 +40,6 @@ const cache = Object.fromEntries(
 function isFresh(entry) {
   if (!entry.updatedAt) return false;
   return Date.now() - new Date(entry.updatedAt).getTime() < CACHE_TTL_MS;
-}
-
-function buildResponse(entry) {
-  return {
-    updatedAt: entry.updatedAt,
-    loading: entry.loading,
-    count: entry.items.length,
-    error: entry.error,
-    items: entry.items
-  };
 }
 
 async function refreshStore(key) {
@@ -68,7 +57,6 @@ async function refreshStore(key) {
 
   entry.loading = true;
   entry.error = null;
-  entry.lastAttemptAt = new Date().toISOString();
 
   try {
     console.log(`🔄 ${store.name} refresh start`);
@@ -110,7 +98,7 @@ function triggerRefreshIfNeeded(key) {
 function createCachedRoute(key) {
   return async (_req, res) => {
     triggerRefreshIfNeeded(key);
-    res.json(buildResponse(cache[key]));
+    res.json(cache[key].items);
   };
 }
 
@@ -120,10 +108,7 @@ function createManualRefreshRoute(key) {
       console.error(`${stores[key].name} manual refresh error:`, e.message);
     });
 
-    res.json({
-      ok: true,
-      message: `${stores[key].name} refresh started`
-    });
+    res.json({ ok: true });
   };
 }
 
@@ -151,8 +136,7 @@ app.get("/health", (_req, res) => {
           updatedAt: entry.updatedAt,
           loading: entry.loading,
           count: entry.items.length,
-          error: entry.error,
-          lastAttemptAt: entry.lastAttemptAt
+          error: entry.error
         }
       ])
     )
@@ -162,17 +146,21 @@ app.get("/health", (_req, res) => {
 app.listen(PORT, () => {
   console.log("🚀 Server running on", PORT);
 
-  // Прогріваємо тільки Silpo на старті, не валимо Railway шістьма браузерами одразу
   refreshStore("silpo").catch((e) => {
     console.error("SILPO initial refresh error:", e.message);
   });
 
-  // Періодичне оновлення тільки тих, що вже були запитані або мають кеш
+  refreshStore("vostorg").catch((e) => {
+    console.error("VOSTORG initial refresh error:", e.message);
+  });
+
+  refreshStore("atb").catch((e) => {
+    console.error("ATB initial refresh error:", e.message);
+  });
+
   setInterval(() => {
     for (const key of Object.keys(stores)) {
-      const entry = cache[key];
-
-      if (entry.updatedAt || entry.items.length > 0) {
+      if (cache[key].updatedAt || cache[key].items.length > 0) {
         refreshStore(key).catch((e) => {
           console.error(`${stores[key].name} interval refresh error:`, e.message);
         });
