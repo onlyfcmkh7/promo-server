@@ -1,6 +1,6 @@
 const puppeteer = require("puppeteer");
 
-const ROST_OFFERS_URL = "https://rostmarket.com.ua/produkti.html?product_list_order=discount_percent_desc";
+const ROST_OFFERS_URL = "https://rostmarket.com.ua/znizhki-40-50/p/1/";
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -76,25 +76,12 @@ async function scrapeRost() {
 
     await sleep(5000);
 
-    await page.waitForSelector(".products.wrapper.grid.products-grid", {
+    await page.waitForSelector("li.item.product.product-item", {
       timeout: 30000
     }).catch(() => {});
 
     await autoScroll(page);
     await sleep(3000);
-
-    const cards = await page.$$eval(
-      "li.item.product.product-item",
-      (els) => els.length
-    ).catch(() => 0);
-    console.log("CARDS:", cards);
-
-    const bodyPreview = await page.evaluate(() =>
-      (document.body?.innerText || "").slice(0, 1000)
-    );
-    console.log("BODY:", bodyPreview);
-
-    console.log("URL:", page.url());
 
     const items = await page.evaluate(() => {
       function parsePrice(value) {
@@ -121,20 +108,22 @@ async function scrapeRost() {
         const imageUrl =
           el.querySelector("img.product-image-photo")?.src || "";
 
-        const price = parsePrice(
-          el.querySelector(".price-box .price")?.innerText
-        );
+        const priceBlock = el.querySelector(".price-box")?.innerText || "";
+        const prices = priceBlock.match(/\d+[\.,]\d+/g) || [];
+
+        const price = parsePrice(prices[0]);
+        const oldPrice = parsePrice(prices[1]) || price;
 
         if (!title || !price || !imageUrl) continue;
 
-        const key = `${title.toLowerCase()}|${price}`;
+        const key = `${title.toLowerCase()}|${price}|${oldPrice}`;
         if (seen.has(key)) continue;
         seen.add(key);
 
         result.push({
           title,
           price,
-          oldPrice: price,
+          oldPrice,
           imageUrl
         });
       }
