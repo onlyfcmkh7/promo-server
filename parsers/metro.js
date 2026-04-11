@@ -91,10 +91,29 @@ async function scrapeMetro() {
       timeout: 90000
     });
 
-    await sleep(2500);
+    await sleep(4000);
+
+    await page.waitForSelector('[data-testid="product-tile"]', {
+      timeout: 30000
+    }).catch(() => {});
+
     await waitForPrices(page);
     await autoScroll(page);
-    await sleep(2000);
+    await sleep(2500);
+
+    console.log("PAGE URL:", page.url());
+
+    const bodyPreview = await page.evaluate(() =>
+      (document.body?.innerText || "").slice(0, 1000)
+    );
+    console.log("BODY PREVIEW:", bodyPreview);
+
+    const tileCount = await page.$$eval(
+      '[data-testid="product-tile"]',
+      (els) => els.length
+    ).catch(() => 0);
+
+    console.log("TILES BEFORE EVALUATE:", tileCount);
 
     const items = await page.evaluate(() => {
       function parsePrice(value) {
@@ -107,7 +126,10 @@ async function scrapeMetro() {
         return Number.isFinite(num) ? Number(num.toFixed(2)) : null;
       }
 
-      const nodes = Array.from(document.querySelectorAll('[data-testid="product-tile"]'));
+      const nodes = Array.from(
+        document.querySelectorAll('[data-testid="product-tile"]')
+      );
+
       const result = [];
       const seen = new Set();
 
