@@ -8,7 +8,9 @@ function sleep(ms) {
 
 function parsePrice(value) {
   if (!value) return null;
-  const cleaned = String(value).replace(",", ".").replace(/[^\d.]/g, "");
+  const cleaned = String(value)
+    .replace(",", ".")
+    .replace(/[^\d.]/g, "");
   const num = Number(cleaned);
   return Number.isFinite(num) ? num : null;
 }
@@ -16,18 +18,26 @@ function parsePrice(value) {
 async function autoScroll(page) {
   await page.evaluate(async () => {
     await new Promise((resolve) => {
-      let total = 0;
-      const distance = 600;
+      let lastHeight = 0;
+      let sameCount = 0;
 
       const timer = setInterval(() => {
-        window.scrollBy(0, distance);
-        total += distance;
+        window.scrollBy(0, 700);
 
-        if (total >= document.body.scrollHeight) {
+        const newHeight = document.body.scrollHeight;
+
+        if (newHeight === lastHeight) {
+          sameCount += 1;
+        } else {
+          sameCount = 0;
+          lastHeight = newHeight;
+        }
+
+        if (sameCount >= 3) {
           clearInterval(timer);
           resolve();
         }
-      }, 200);
+      }, 400);
     });
   });
 }
@@ -77,55 +87,55 @@ async function scrapeATB() {
 
     await sleep(3000);
     await accept18PlusIfNeeded(page);
-
     await autoScroll(page);
     await sleep(2000);
 
     const rawItems = await page.evaluate(() => {
       function parsePrice(str) {
         if (!str) return null;
-        const m = str.replace(",", ".").match(/\d+(\.\d+)?/);
-        return m ? Number(m[0]) : null;
+
+        const valueAttr = str.match(/^\d+(\.\d+)?$/);
+        if (valueAttr) return Number(valueAttr[0]);
+
+        const cleaned = String(str)
+          .replace(",", ".")
+          .replace(/[^\d.]/g, "");
+
+        const num = Number(cleaned);
+        return Number.isFinite(num) ? num : null;
       }
 
-      function getImage(node) {
-        const img = node.querySelector("img");
-        return (
-          img?.currentSrc ||
-          img?.src ||
-          img?.getAttribute("data-src") ||
-          ""
-        );
-      }
-
-      const nodes = [...document.querySelectorAll("a, div, section")];
-
+      const cards = [...document.querySelectorAll(".catalog-item")];
       const result = [];
       const seen = new Set();
 
-      for (const node of nodes) {
-        const text = (node.innerText || "")
-          .replace(/\s+/g, " ")
+      for (const card of cards) {
+        const title = card
+          .querySelector(".catalog-item__title a")
+          ?.innerText?.replace(/\s+/g, " ")
           .trim();
 
-        const match = text.match(
-          /(\d+[.,]\d{2})\s*грн\/шт\s*(\d+[.,]\d{2})/
-        );
+        const priceText =
+          card.querySelector(".product-price__top")?.getAttribute("value") ||
+          card.querySelector(".product-price__top")?.textContent ||
+          "";
 
-        if (!match) continue;
+        const oldPriceText =
+          card.querySelector(".product-price__bottom")?.getAttribute("value") ||
+          card.querySelector(".product-price__bottom")?.textContent ||
+          "";
 
-        const price = parsePrice(match[1]);
-        const oldPrice = parsePrice(match[2]);
+        const imageUrl =
+          card.querySelector(".catalog-item__img")?.currentSrc ||
+          card.querySelector(".catalog-item__img")?.src ||
+          "";
 
-        if (!price) continue;
+        const price = parsePrice(priceText);
+        const oldPrice = parsePrice(oldPriceText);
 
-        const title = text
-          .replace(match[0], "")
-          .replace(/-\d+%/g, "")
-          .trim()
-          .slice(0, 120);
+        if (!title || !price) continue;
 
-        const key = title + price;
+        const key = `${title}_${price}`;
         if (seen.has(key)) continue;
         seen.add(key);
 
@@ -133,7 +143,7 @@ async function scrapeATB() {
           title,
           price,
           oldPrice: oldPrice || price,
-          imageUrl: getImage(node)
+          imageUrl
         });
       }
 
@@ -145,15 +155,11 @@ async function scrapeATB() {
     const items = rawItems.map((item, i) => ({
       id: String(i + 1),
       storeId: 1,
+      category: "other",
       title: item.title,
       price: item.price,
-      oldPrice: item.oldPrice,
-      discountPercent:
-        item.oldPrice > item.price
-          ? Math.round(((item.oldPrice - item.price) / item.oldPrice) * 100)
-          : null,
-      createdAt: Date.now(),
-      imageUrl: item.imageUrl
+      oldPrice: item.oldPrice ?? null,
+      imageUrl: item.imageUrl || null
     }));
 
     console.log("✅ FINAL:", items.length);
