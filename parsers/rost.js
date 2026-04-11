@@ -74,13 +74,27 @@ async function scrapeRost() {
       timeout: 90000
     });
 
-    await sleep(2500);
-    await page.waitForSelector("li.item.product.product-item", {
+    await sleep(5000);
+
+    await page.waitForSelector(".products.wrapper.grid.products-grid", {
       timeout: 30000
     }).catch(() => {});
 
     await autoScroll(page);
-    await sleep(2000);
+    await sleep(3000);
+
+    const cards = await page.$$eval(
+      "li.item.product.product-item",
+      (els) => els.length
+    ).catch(() => 0);
+    console.log("CARDS:", cards);
+
+    const bodyPreview = await page.evaluate(() =>
+      (document.body?.innerText || "").slice(0, 1000)
+    );
+    console.log("BODY:", bodyPreview);
+
+    console.log("URL:", page.url());
 
     const items = await page.evaluate(() => {
       function parsePrice(value) {
@@ -93,13 +107,19 @@ async function scrapeRost() {
         return Number.isFinite(num) ? Number(num.toFixed(2)) : null;
       }
 
-      const nodes = Array.from(document.querySelectorAll("li.item.product.product-item"));
+      const nodes = Array.from(
+        document.querySelectorAll("li.item.product.product-item")
+      );
+
       const result = [];
       const seen = new Set();
 
       for (const el of nodes) {
-        const title = el.querySelector(".product-item-link")?.innerText?.trim() || "";
-        const imageUrl = el.querySelector("img.product-image-photo")?.src || "";
+        const title =
+          el.querySelector(".product-item-link")?.innerText?.trim() || "";
+
+        const imageUrl =
+          el.querySelector("img.product-image-photo")?.src || "";
 
         const price = parsePrice(
           el.querySelector(".price-box .price")?.innerText
