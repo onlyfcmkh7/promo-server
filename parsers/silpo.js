@@ -43,9 +43,11 @@ async function acceptCookies(page) {
   }
 }
 
-async function autoScroll(page, steps = 10) {
+async function autoScroll(page, steps = 12) {
   for (let i = 0; i < steps; i++) {
-    await page.mouse.wheel({ deltaY: 1200 });
+    await page.evaluate(() => {
+      window.scrollBy(0, 1200);
+    });
     await sleep(700);
   }
 }
@@ -90,7 +92,7 @@ async function scrapeSilpo() {
     await acceptCookies(page);
     await sleep(1500);
 
-    console.log("[SILPO] first wait");
+    console.log("[SILPO] wait content");
     await page.waitForFunction(
       () => {
         const text = document.body?.innerText || "";
@@ -108,6 +110,13 @@ async function scrapeSilpo() {
       timeout: 30000
     }).catch(() => {});
 
+    const count = await page.$$eval(
+      "silpo-products-list-item",
+      (els) => els.length
+    ).catch(() => 0);
+
+    console.log("SILPO CARD COUNT:", count);
+
     console.log("[SILPO] extract");
 
     const rawItems = await page.evaluate(() => {
@@ -122,10 +131,7 @@ async function scrapeSilpo() {
         return Number.isFinite(num) ? num : null;
       }
 
-      const cards = [
-        ...document.querySelectorAll("silpo-products-list-item")
-      ];
-
+      const cards = [...document.querySelectorAll("silpo-products-list-item")];
       const result = [];
       const seen = new Set();
 
