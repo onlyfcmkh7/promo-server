@@ -78,20 +78,7 @@ async function scrapeATB() {
     await sleep(3000);
     await accept18PlusIfNeeded(page);
 
-    // 🔥 ЧЕКАЄМО ПОЯВУ КАРТОК
-    await page.waitForSelector("article.catalog-item", {
-      timeout: 20000
-    });
-
-    // 🔥 СКРОЛ ДЛЯ LAZY LOAD
     await autoScroll(page);
-
-    // 🔥 ЧЕКАЄМО ЩОБ ПІДГРУЗИЛИСЬ
-    await page.waitForFunction(
-      () => document.querySelectorAll("article.catalog-item").length > 100,
-      { timeout: 20000 }
-    ).catch(() => {});
-
     await sleep(2000);
 
     const rawItems = await page.evaluate(() => {
@@ -101,42 +88,54 @@ async function scrapeATB() {
         return m ? Number(m[0]) : null;
       }
 
-      const cards = document.querySelectorAll("article.catalog-item");
+      function getImage(node) {
+        const img = node.querySelector("img");
+        return (
+          img?.currentSrc ||
+          img?.src ||
+          img?.getAttribute("data-src") ||
+          ""
+        );
+      }
+
+      const nodes = [...document.querySelectorAll("a, div, section")];
+
       const result = [];
+      const seen = new Set();
 
-      cards.forEach(card => {
-        const title =
-          card.querySelector("a")?.innerText?.trim() || "";
+      for (const node of nodes) {
+        const text = (node.innerText || "")
+          .replace(/\s+/g, " ")
+          .trim();
 
-        if (!title) return;
+        const match = text.match(
+          /(\d+[.,]\d{2})\s*грн\/шт\s*(\d+[.,]\d{2})/
+        );
 
-        const priceBlock = [...card.querySelectorAll("*")]
-          .find(el => el.innerText?.includes("грн/шт"));
+        if (!match) continue;
 
-        if (!priceBlock) return;
+        const price = parsePrice(match[1]);
+        const oldPrice = parsePrice(match[2]);
 
-        const lines = priceBlock.innerText
-          .split("\n")
-          .map(t => t.trim())
-          .filter(Boolean);
+        if (!price) continue;
 
-        const price = parsePrice(lines[0]);
-        const oldPrice = parsePrice(lines[1]);
+        const title = text
+          .replace(match[0], "")
+          .replace(/-\d+%/g, "")
+          .trim()
+          .slice(0, 120);
 
-        const imageUrl =
-          card.querySelector("img")?.currentSrc ||
-          card.querySelector("img")?.src ||
-          "";
-
-        if (!price) return;
+        const key = title + price;
+        if (seen.has(key)) continue;
+        seen.add(key);
 
         result.push({
           title,
           price,
           oldPrice: oldPrice || price,
-          imageUrl
+          imageUrl: getImage(node)
         });
-      });
+      }
 
       return result;
     });
