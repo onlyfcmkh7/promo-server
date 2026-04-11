@@ -14,7 +14,7 @@ app.use(cors());
 app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
-const CACHE_TTL_MS = 30 * 60 * 1000;
+const CACHE_TTL_MS = 8 * 60 * 60 * 1000; // 8 годин = 3 рази на день
 
 const stores = {
   atb: { name: "ATB", scraper: scrapeATB },
