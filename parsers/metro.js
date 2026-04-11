@@ -1,75 +1,172 @@
 const puppeteer = require("puppeteer");
 
+const METRO_OFFERS_URL = "https://metro.zakaz.ua/uk/custom-categories/promotions/";
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function normalizeImage(url) {
+  if (!url) return "";
+  if (url.startsWith("//")) return "https:" + url;
+  if (url.startsWith("/")) return "https://metro.zakaz.ua" + url;
+  return url;
+}
+
+async function autoScroll(page) {
+  await page.evaluate(async () => {
+    await new Promise((resolve) => {
+      let total = 0;
+      const step = 800;
+      let idle = 0;
+      let lastHeight = document.body.scrollHeight;
+
+      const timer = setInterval(() => {
+        window.scrollBy(0, step);
+        total += step;
+
+        const currentHeight = document.body.scrollHeight;
+
+        if (currentHeight === lastHeight) {
+          idle += 1;
+        } else {
+          idle = 0;
+          lastHeight = currentHeight;
+        }
+
+        if (idle >= 4 || total > currentHeight + 1500) {
+          clearInterval(timer);
+          resolve();
+        }
+      }, 400);
+    });
+  });
+}
+
+async function waitForPrices(page) {
+  await page.waitForFunction(
+    () => {
+      const tiles = document.querySelectorAll('[data-testid="product-tile"]');
+      if (!tiles.length) return false;
+
+      return Array.from(tiles).some((el) => {
+        return (
+          el.querySelector('[data-marker="Discounted Price"]') ||
+          el.querySelector('[data-marker="Old Price"]')
+        );
+      });
+    },
+    { timeout: 20000 }
+  ).catch(() => {});
+}
+
 async function scrapeMetro() {
-  console.log("🚀 METRO INTERCEPT");
+  console.log("🚀 METRO PARSER START");
 
   const browser = await puppeteer.launch({
     headless: "new",
     args: [
       "--no-sandbox",
       "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage"
+      "--disable-dev-shm-usage",
+      "--disable-gpu"
     ]
   });
 
   try {
     const page = await browser.newPage();
 
-    let apiData = null;
+    await page.setViewport({ width: 1400, height: 2000 });
 
-    // 🔥 ловимо API
-    page.on("response", async (response) => {
-      const url = response.url();
+    await page.setUserAgent(
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/135.0.0.0 Safari/537.36"
+    );
 
-      if (url.includes("/products") && url.includes("promo")) {
-        try {
-          const json = await response.json();
-          apiData = json;
-        } catch (_) {}
+    await page.setExtraHTTPHeaders({
+      "Accept-Language": "uk-UA,uk;q=0.9,en;q=0.8"
+    });
+
+    await page.goto(METRO_OFFERS_URL, {
+      waitUntil: "domcontentloaded",
+      timeout: 90000
+    });
+
+    await sleep(2500);
+    await waitForPrices(page);
+    await autoScroll(page);
+    await sleep(2000);
+
+    const items = await page.evaluate(() => {
+      function parsePrice(value) {
+        const cleaned = String(value || "")
+          .replace(/\s+/g, "")
+          .replace(",", ".")
+          .replace(/[^\d.]/g, "");
+
+        const num = Number(cleaned);
+        return Number.isFinite(num) ? Number(num.toFixed(2)) : null;
       }
-    });
 
-    await page.goto("https://metro.zakaz.ua/uk/promotions/", {
-      waitUntil: "networkidle2",
-      timeout: 60000
-    });
+      const nodes = Array.from(document.querySelectorAll('[data-testid="product-tile"]'));
+      const result = [];
+      const seen = new Set();
 
-    // даємо час API прогрузитись
-    await new Promise((r) => setTimeout(r, 5000));
+      for (const el of nodes) {
+        const title =
+          el.querySelector('[data-testid="product_tile_title"]')?.innerText?.trim() || "";
 
-    if (!apiData || !apiData.results) {
-      console.log("❌ NO API DATA");
-      return [];
-    }
+        const price = parsePrice(
+          el.querySelector('[data-marker="Discounted Price"] .Price__value_caption')?.innerText
+        );
 
-    const items = apiData.results
-      .map((item, i) => {
-        const price = item.price;
-        const oldPrice = item.old_price;
+        const oldPrice = parsePrice(
+          el.querySelector('[data-marker="Old Price"] .Price__value_body')?.innerText
+        );
 
-        if (!price || !oldPrice || oldPrice <= price) return null;
+        const imageUrl = el.querySelector("img")?.src || "";
 
-        return {
-          id: String(i + 1),
-          storeId: 3,
-          title: item.title,
-          brand: (item.title || "").split(" ")[0],
+        if (!title || !price || !imageUrl) continue;
+
+        const finalOldPrice = oldPrice || price;
+        const key = `${title.toLowerCase()}|${price}|${finalOldPrice}`;
+
+        if (seen.has(key)) continue;
+        seen.add(key);
+
+        result.push({
+          title,
           price,
-          oldPrice,
-          discountPercent: Math.round(
-            ((oldPrice - price) / oldPrice) * 100
-          ),
-          imageUrl: item.image?.s350 || item.image?.s200 || ""
-        };
-      })
-      .filter(Boolean);
+          oldPrice: finalOldPrice,
+          imageUrl
+        });
+      }
 
-    console.log("✅ METRO:", items.length);
+      return result;
+    });
 
-    return items;
+    const normalized = items.map((item, index) => ({
+      id: String(index + 1),
+      storeId: 3,
+      title: item.title,
+      price: item.price,
+      oldPrice: item.oldPrice,
+      imageUrl: normalizeImage(item.imageUrl),
+      createdAt: Date.now()
+    }));
+
+    console.log("FOUND:", items.length);
+    console.log("FINAL:", normalized.length);
+    console.log("✅ METRO ITEMS:", normalized.length);
+
+    return normalized;
+  } catch (e) {
+    console.error("❌ METRO ERROR:", e.message);
+    return [];
   } finally {
-    await browser.close();
+    await browser.close().catch(() => {});
   }
 }
 
-module.exports = { scrapeMetro };
+module.exports = {
+  scrapeMetro
+};
