@@ -1,20 +1,9 @@
 const puppeteer = require("puppeteer");
 
-const SILPO_URL = "https://silpo.ua/offers";
+const SILPO_OFFERS_URL = "https://silpo.ua/offers";
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function parsePrice(value) {
-  if (!value) return null;
-
-  const cleaned = String(value)
-    .replace(",", ".")
-    .replace(/[^\d.]/g, "");
-
-  const num = Number(cleaned);
-  return Number.isFinite(num) ? num : null;
 }
 
 function normalizeImage(url) {
@@ -24,32 +13,34 @@ function normalizeImage(url) {
   return url;
 }
 
-async function acceptCookies(page) {
-  const buttons = await page.$$("button, a, [role='button']");
+async function autoScroll(page) {
+  await page.evaluate(async () => {
+    await new Promise((resolve) => {
+      let total = 0;
+      const step = 800;
+      let idle = 0;
+      let lastHeight = document.body.scrollHeight;
 
-  for (const btn of buttons) {
-    try {
-      const text = await page.evaluate(
-        (el) => (el.innerText || el.textContent || "").trim(),
-        btn
-      );
+      const timer = setInterval(() => {
+        window.scrollBy(0, step);
+        total += step;
 
-      if (/прийняти|accept|ok|добре|погоджуюсь|зрозуміло/i.test(text)) {
-        await btn.click().catch(() => {});
-        await sleep(1000);
-        return;
-      }
-    } catch (_) {}
-  }
-}
+        const currentHeight = document.body.scrollHeight;
 
-async function autoScroll(page, steps = 12) {
-  for (let i = 0; i < steps; i++) {
-    await page.evaluate(() => {
-      window.scrollBy(0, 1200);
+        if (currentHeight === lastHeight) {
+          idle += 1;
+        } else {
+          idle = 0;
+          lastHeight = currentHeight;
+        }
+
+        if (idle >= 4 || total > currentHeight + 1500) {
+          clearInterval(timer);
+          resolve();
+        }
+      }, 400);
     });
-    await sleep(700);
-  }
+  });
 }
 
 async function scrapeSilpo() {
@@ -57,7 +48,6 @@ async function scrapeSilpo() {
 
   const browser = await puppeteer.launch({
     headless: "new",
-    protocolTimeout: 180000,
     args: [
       "--no-sandbox",
       "--disable-setuid-sandbox",
@@ -69,7 +59,7 @@ async function scrapeSilpo() {
   try {
     const page = await browser.newPage();
 
-    await page.setViewport({ width: 1440, height: 2200 });
+    await page.setViewport({ width: 1400, height: 2000 });
 
     await page.setUserAgent(
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/135.0.0.0 Safari/537.36"
@@ -79,94 +69,73 @@ async function scrapeSilpo() {
       "Accept-Language": "uk-UA,uk;q=0.9,en;q=0.8"
     });
 
-    console.log("[SILPO] goto offers");
+    console.log(`PAGE 1: ${SILPO_OFFERS_URL}`);
 
-    await page.goto(SILPO_URL, {
+    await page.goto(SILPO_OFFERS_URL, {
       waitUntil: "domcontentloaded",
       timeout: 90000
     });
 
-    await sleep(4000);
+    await sleep(5000);
 
-    console.log("[SILPO] accept cookies");
-    await acceptCookies(page);
-    await sleep(1500);
-
-    console.log("[SILPO] wait content");
-    await page.waitForFunction(
-      () => {
-        const text = document.body?.innerText || "";
-        return /грн|₴|акц|знижк/i.test(text);
-      },
-      { timeout: 30000 }
-    ).catch(() => {});
-
-    console.log("[SILPO] scroll");
-    await autoScroll(page, 12);
-    await sleep(2500);
-
-    console.log("[SILPO] wait items");
     await page.waitForSelector("silpo-products-list-item", {
       timeout: 30000
     }).catch(() => {});
 
-    const count = await page.$$eval(
-      "silpo-products-list-item",
-      (els) => els.length
-    ).catch(() => 0);
+    await autoScroll(page);
+    await sleep(2500);
 
-    console.log("SILPO CARD COUNT:", count);
-
-    console.log("[SILPO] extract");
-
-    const rawItems = await page.evaluate(() => {
-      function parsePrice(str) {
-        if (!str) return null;
-
-        const cleaned = String(str)
+    const items = await page.evaluate(() => {
+      function parsePrice(value) {
+        const cleaned = String(value || "")
+          .replace(/\s+/g, "")
           .replace(",", ".")
           .replace(/[^\d.]/g, "");
 
         const num = Number(cleaned);
-        return Number.isFinite(num) ? num : null;
+        return Number.isFinite(num) ? Number(num.toFixed(2)) : null;
       }
 
-      const cards = [...document.querySelectorAll("silpo-products-list-item")];
+      function getImage(el) {
+        const img = el.querySelector(".product-card__product-img");
+        if (!img) return "";
+
+        return (
+          img.currentSrc ||
+          img.src ||
+          img.getAttribute("src") ||
+          img.getAttribute("data-src") ||
+          ""
+        );
+      }
+
+      const nodes = Array.from(
+        document.querySelectorAll("silpo-products-list-item")
+      );
+
       const result = [];
-      const seen = new Set();
 
-      for (const item of cards) {
-        const title = item
-          .querySelector(".product-card__title")
-          ?.textContent?.replace(/\s+/g, " ")
-          .trim();
+      for (const el of nodes) {
+        const title =
+          el.querySelector(".product-card__title")?.innerText?.trim() || "";
 
-        const priceText = item
-          .querySelector(".product-card-price__displayPrice")
-          ?.textContent;
+        const imageUrl = getImage(el);
 
-        const oldPriceText = item
-          .querySelector(".product-card-price__displayOldPrice")
-          ?.textContent;
+        const priceText =
+          el.querySelector(".product-card-price__displayPrice")?.innerText || "";
 
-        const imageUrl =
-          item.querySelector(".product-card__product-img")?.currentSrc ||
-          item.querySelector(".product-card__product-img")?.src ||
-          "";
+        const oldPriceText =
+          el.querySelector(".product-card-price__displayOldPrice")?.innerText || "";
 
         const price = parsePrice(priceText);
-        const oldPrice = parsePrice(oldPriceText);
+        const oldPrice = parsePrice(oldPriceText) || price;
 
-        if (!title || !price) continue;
-
-        const key = `${title}_${price}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
+        if (!title || !price || !imageUrl) continue;
 
         result.push({
           title,
           price,
-          oldPrice: oldPrice && oldPrice > price ? oldPrice : null,
+          oldPrice,
           imageUrl
         });
       }
@@ -174,22 +143,33 @@ async function scrapeSilpo() {
       return result;
     });
 
-    console.log("🔍 SILPO RAW:", rawItems.length);
+    console.log("FOUND PAGE 1:", items.length);
 
-    const items = rawItems.map((item, i) => ({
-      id: String(i + 1),
-      storeId: 2,
-      category: "other",
-      title: item.title,
-      price: item.price,
-      oldPrice: item.oldPrice ?? null,
-      imageUrl: normalizeImage(item.imageUrl) || null
-    }));
+    const seen = new Set();
 
-    console.log("✅ SILPO FINAL:", items.length);
-    console.log("SILPO SAMPLE:", JSON.stringify(items.slice(0, 3), null, 2));
+    const normalized = items
+      .filter((item) => {
+        const key = `${item.title.toLowerCase()}|${item.price}|${item.oldPrice}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .map((item, index) => ({
+        id: String(index + 1),
+        storeId: 2,
+        category: "other",
+        title: item.title,
+        price: item.price,
+        oldPrice: item.oldPrice,
+        imageUrl: normalizeImage(item.imageUrl),
+        createdAt: Date.now()
+      }));
 
-    return items;
+    console.log("FOUND:", items.length);
+    console.log("FINAL:", normalized.length);
+    console.log("✅ SILPO ITEMS:", normalized.length);
+
+    return normalized;
   } catch (e) {
     console.error("❌ SILPO ERROR:", e.message);
     return [];
