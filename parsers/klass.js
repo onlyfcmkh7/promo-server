@@ -20,36 +20,6 @@ function normalizeImage(url) {
   return url;
 }
 
-async function autoScroll(page) {
-  await page.evaluate(async () => {
-    await new Promise((resolve) => {
-      let total = 0;
-      const step = 800;
-      let idle = 0;
-      let lastHeight = document.body.scrollHeight;
-
-      const timer = setInterval(() => {
-        window.scrollBy(0, step);
-        total += step;
-
-        const currentHeight = document.body.scrollHeight;
-
-        if (currentHeight === lastHeight) {
-          idle += 1;
-        } else {
-          idle = 0;
-          lastHeight = currentHeight;
-        }
-
-        if (idle >= 4 || total > currentHeight + 1500) {
-          clearInterval(timer);
-          resolve();
-        }
-      }, 400);
-    });
-  });
-}
-
 async function scrapeKlass() {
   console.log("🚀 KLASS PARSER START");
 
@@ -85,13 +55,10 @@ async function scrapeKlass() {
       });
 
       await sleep(4000);
-      await autoScroll(page);
-      await sleep(2000);
 
       const pageItems = await page.evaluate(() => {
         function parsePrice(text) {
           const cleaned = String(text || "")
-            .replace(/\s+/g, "")
             .replace(",", ".")
             .replace(/[^\d.]/g, "");
 
@@ -99,49 +66,36 @@ async function scrapeKlass() {
           return Number.isFinite(num) ? Number(num.toFixed(2)) : null;
         }
 
-        function getImage(el) {
-          const img = el.querySelector("img");
-          if (!img) return "";
-
-          return (
-            img.currentSrc ||
-            img.src ||
-            img.getAttribute("src") ||
-            img.getAttribute("data-src") ||
-            ""
-          );
-        }
-
-        const nodes = Array.from(document.querySelectorAll("a, article, div"));
+        const cards = document.querySelectorAll("li.catalog-grid__item");
         const result = [];
 
-        for (const el of nodes) {
-          const text = (el.innerText || "").replace(/\s+/g, " ").trim();
+        for (const el of cards) {
+          const title = el
+            .querySelector(".catalogCard-title a")
+            ?.textContent?.trim();
 
-          if (!/грн\/шт/i.test(text)) continue;
-          if (text.length > 300) continue;
+          const priceText = el
+            .querySelector(".catalogCard-price")
+            ?.textContent;
 
-          const prices = text.match(/\d+[.,]\d+/g) || [];
-          const price = parsePrice(prices[0]);
-          const oldPrice = parsePrice(prices[1]) || price;
-          const imageUrl = getImage(el);
+          const oldPriceText = el
+            .querySelector(".catalogCard-oldPrice")
+            ?.textContent;
 
-          if (!price) continue;
+          const img = el.querySelector(".catalogCard-img");
 
-          let title = text
-            .replace(/-\d+%/g, "")
-            .replace(/\d+[.,]\d+/g, "")
-            .replace(/грн\/шт/gi, "")
-            .replace(/Артикул:\s*[\d/]+/gi, "")
-            .replace(/\s+/g, " ")
-            .trim();
+          const imageUrl =
+            img?.currentSrc || img?.src || "";
 
-          if (!title || title.length < 4) continue;
+          const price = parsePrice(priceText);
+          const oldPrice = parsePrice(oldPriceText);
+
+          if (!title || !price) continue;
 
           result.push({
             title,
             price,
-            oldPrice,
+            oldPrice: oldPrice && oldPrice > price ? oldPrice : price,
             imageUrl
           });
         }
@@ -149,13 +103,14 @@ async function scrapeKlass() {
         return result;
       });
 
-      console.log(`FOUND PAGE ${i + 1}: ${pageItems.length}`);
+      console.log(`FOUND PAGE ${i + 1}:`, pageItems.length);
 
       for (const item of pageItems) {
-        const key = `${item.title.toLowerCase()}|${item.price}|${item.oldPrice}`;
+        const key = `${item.title.toLowerCase()}|${item.price}`;
 
         if (seen.has(key)) continue;
         seen.add(key);
+
         allItems.push(item);
       }
     }
@@ -171,7 +126,6 @@ async function scrapeKlass() {
       createdAt: Date.now()
     }));
 
-    console.log("FOUND:", allItems.length);
     console.log("FINAL:", normalized.length);
     console.log("✅ KLASS ITEMS:", normalized.length);
 
