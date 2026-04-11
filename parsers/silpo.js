@@ -71,31 +71,11 @@ async function acceptCookies(page) {
   }
 }
 
-async function autoScroll(page) {
-  await page.evaluate(async () => {
-    await new Promise((resolve) => {
-      let lastHeight = 0;
-      let sameCount = 0;
-
-      const timer = setInterval(() => {
-        window.scrollBy(0, 900);
-
-        const newHeight = document.body.scrollHeight;
-
-        if (newHeight === lastHeight) {
-          sameCount += 1;
-        } else {
-          sameCount = 0;
-          lastHeight = newHeight;
-        }
-
-        if (sameCount >= 4) {
-          clearInterval(timer);
-          resolve();
-        }
-      }, 450);
-    });
-  });
+async function autoScroll(page, steps = 10) {
+  for (let i = 0; i < steps; i++) {
+    await page.mouse.wheel({ deltaY: 1200 });
+    await sleep(700);
+  }
 }
 
 async function scrapeSilpo() {
@@ -133,11 +113,12 @@ async function scrapeSilpo() {
     });
 
     await sleep(3000);
+
+    console.log("[SILPO] accept cookies");
     await acceptCookies(page);
     await sleep(1500);
 
     console.log("[SILPO] wait content");
-
     await page.waitForFunction(
       () => {
         const text = document.body?.innerText || "";
@@ -147,8 +128,8 @@ async function scrapeSilpo() {
     ).catch(() => {});
 
     console.log("[SILPO] scroll");
-    await autoScroll(page);
-    await sleep(2500);
+    await autoScroll(page, 10);
+    await sleep(2000);
 
     console.log("[SILPO] extract");
 
