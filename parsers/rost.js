@@ -1,6 +1,7 @@
 const puppeteer = require("puppeteer");
 
-const ROST_OFFERS_URL = "https://rostmarket.com.ua/znizhki-40-50/p/1/";
+const ROST_OFFERS_BASE = "https://rostmarket.com.ua/znizhki-40-50/p/";
+const TOTAL_PAGES = 21;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -69,69 +70,93 @@ async function scrapeRost() {
       "Accept-Language": "uk-UA,uk;q=0.9,en;q=0.8"
     });
 
-    await page.goto(ROST_OFFERS_URL, {
-      waitUntil: "domcontentloaded",
-      timeout: 90000
-    });
+    const allItems = [];
+    const seen = new Set();
 
-    await sleep(5000);
+    for (let pageNumber = 1; pageNumber <= TOTAL_PAGES; pageNumber++) {
+      const url = `${ROST_OFFERS_BASE}${pageNumber}/`;
+      console.log(`PAGE ${pageNumber}: ${url}`);
 
-    await page.waitForSelector("li.item.product.product-item", {
-      timeout: 30000
-    }).catch(() => {});
+      await page.goto(url, {
+        waitUntil: "domcontentloaded",
+        timeout: 90000
+      });
 
-    await autoScroll(page);
-    await sleep(3000);
+      await sleep(4000);
 
-    const items = await page.evaluate(() => {
-      function parsePrice(value) {
-        const cleaned = String(value || "")
-          .replace(/\s+/g, "")
-          .replace(",", ".")
-          .replace(/[^\d.]/g, "");
+      await page.waitForSelector("li.item.product.product-item", {
+        timeout: 30000
+      }).catch(() => {});
 
-        const num = Number(cleaned);
-        return Number.isFinite(num) ? Number(num.toFixed(2)) : null;
-      }
+      await autoScroll(page);
+      await sleep(2000);
 
-      const nodes = Array.from(
-        document.querySelectorAll("li.item.product.product-item")
-      );
+      const pageItems = await page.evaluate(() => {
+        function parsePrice(value) {
+          const cleaned = String(value || "")
+            .replace(/\s+/g, "")
+            .replace(",", ".")
+            .replace(/[^\d.]/g, "");
 
-      const result = [];
-      const seen = new Set();
+          const num = Number(cleaned);
+          return Number.isFinite(num) ? Number(num.toFixed(2)) : null;
+        }
 
-      for (const el of nodes) {
-        const title =
-          el.querySelector(".product-item-link")?.innerText?.trim() || "";
+        function getImage(el) {
+          const img = el.querySelector("img.product-image-photo");
+          if (!img) return "";
 
-        const imageUrl =
-          el.querySelector("img.product-image-photo")?.src || "";
+          return (
+            img.currentSrc ||
+            img.src ||
+            img.getAttribute("src") ||
+            img.getAttribute("data-src") ||
+            ""
+          );
+        }
 
-        const priceBlock = el.querySelector(".price-box")?.innerText || "";
-        const prices = priceBlock.match(/\d+[\.,]\d+/g) || [];
+        const nodes = Array.from(
+          document.querySelectorAll("li.item.product.product-item")
+        );
 
-        const price = parsePrice(prices[0]);
-        const oldPrice = parsePrice(prices[1]) || price;
+        const result = [];
 
-        if (!title || !price || !imageUrl) continue;
+        for (const el of nodes) {
+          const title =
+            el.querySelector(".product-item-link")?.innerText?.trim() || "";
 
-        const key = `${title.toLowerCase()}|${price}|${oldPrice}`;
+          const imageUrl = getImage(el);
+          const priceBlock = el.querySelector(".price-box")?.innerText || "";
+          const prices = priceBlock.match(/\d+[\.,]\d+/g) || [];
+
+          const price = parsePrice(prices[0]);
+          const oldPrice = parsePrice(prices[1]) || price;
+
+          if (!title || !price || !imageUrl) continue;
+
+          result.push({
+            title,
+            price,
+            oldPrice,
+            imageUrl
+          });
+        }
+
+        return result;
+      });
+
+      console.log(`FOUND PAGE ${pageNumber}:`, pageItems.length);
+
+      for (const item of pageItems) {
+        const key = `${item.title.toLowerCase()}|${item.price}|${item.oldPrice}`;
+
         if (seen.has(key)) continue;
         seen.add(key);
-
-        result.push({
-          title,
-          price,
-          oldPrice,
-          imageUrl
-        });
+        allItems.push(item);
       }
+    }
 
-      return result;
-    });
-
-    const normalized = items.map((item, index) => ({
+    const normalized = allItems.map((item, index) => ({
       id: String(index + 1),
       storeId: 6,
       title: item.title,
@@ -141,7 +166,7 @@ async function scrapeRost() {
       createdAt: Date.now()
     }));
 
-    console.log("FOUND:", items.length);
+    console.log("FOUND:", allItems.length);
     console.log("FINAL:", normalized.length);
     console.log("✅ ROST ITEMS:", normalized.length);
 
