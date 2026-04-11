@@ -1,39 +1,15 @@
 const puppeteer = require("puppeteer");
 
-const ROST_URL = "https://rost.kh.ua/";
+const ROST_OFFERS_URL = "https://rostmarket.com.ua/produkti.html?product_list_order=discount_percent_desc";
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function parsePrice(value) {
-  if (!value) return null;
-
-  const cleaned = String(value)
-    .replace(/\s+/g, "")
-    .replace(",", ".")
-    .replace(/[^\d.]/g, "");
-
-  const num = Number(cleaned);
-  return Number.isFinite(num) ? num : null;
-}
-
-function normalizeTitle(title) {
-  return String(title || "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function detectBrand(title) {
-  return normalizeTitle(title).split(" ")[0] || "";
-}
-
-function normalizeImageUrl(url) {
+function normalizeImage(url) {
   if (!url) return "";
-
-  if (url.startsWith("//")) return `https:${url}`;
-  if (url.startsWith("/")) return `https://rost.kh.ua${url}`;
-
+  if (url.startsWith("//")) return "https:" + url;
+  if (url.startsWith("/")) return "https://rostmarket.com.ua" + url;
   return url;
 }
 
@@ -41,128 +17,141 @@ async function autoScroll(page) {
   await page.evaluate(async () => {
     await new Promise((resolve) => {
       let total = 0;
-      const distance = 500;
+      const step = 800;
+      let idle = 0;
+      let lastHeight = document.body.scrollHeight;
 
       const timer = setInterval(() => {
-        window.scrollBy(0, distance);
-        total += distance;
+        window.scrollBy(0, step);
+        total += step;
 
-        if (total >= document.body.scrollHeight) {
+        const currentHeight = document.body.scrollHeight;
+
+        if (currentHeight === lastHeight) {
+          idle += 1;
+        } else {
+          idle = 0;
+          lastHeight = currentHeight;
+        }
+
+        if (idle >= 4 || total > currentHeight + 1500) {
           clearInterval(timer);
           resolve();
         }
-      }, 200);
+      }, 400);
     });
   });
 }
 
 async function scrapeRost() {
-  console.log("🚀 START SCRAPING ROST");
+  console.log("🚀 ROST PARSER START");
 
   const browser = await puppeteer.launch({
     headless: "new",
-    ignoreHTTPSErrors: true,
     args: [
       "--no-sandbox",
       "--disable-setuid-sandbox",
       "--disable-dev-shm-usage",
-      "--ignore-certificate-errors"
+      "--disable-gpu"
     ]
   });
 
   try {
     const page = await browser.newPage();
 
+    await page.setViewport({ width: 1400, height: 2000 });
+
     await page.setUserAgent(
-      "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/135.0.0.0 Safari/537.36"
     );
 
-    await page.goto(ROST_URL, {
-      waitUntil: "networkidle2",
-      timeout: 60000
+    await page.setExtraHTTPHeaders({
+      "Accept-Language": "uk-UA,uk;q=0.9,en;q=0.8"
     });
 
-    await sleep(3000);
+    await page.goto(ROST_OFFERS_URL, {
+      waitUntil: "domcontentloaded",
+      timeout: 90000
+    });
+
+    await sleep(2500);
+    await page.waitForSelector("li.item.product.product-item", {
+      timeout: 30000
+    }).catch(() => {});
+
     await autoScroll(page);
     await sleep(2000);
 
-    const rawItems = await page.evaluate(() => {
-      function txt(el) {
-        return (el?.innerText || el?.textContent || "")
-          .replace(/\s+/g, " ")
-          .trim();
+    const items = await page.evaluate(() => {
+      function parsePrice(value) {
+        const cleaned = String(value || "")
+          .replace(/\s+/g, "")
+          .replace(",", ".")
+          .replace(/[^\d.]/g, "");
+
+        const num = Number(cleaned);
+        return Number.isFinite(num) ? Number(num.toFixed(2)) : null;
       }
 
-      function getImg(card) {
-        const img = card.querySelector("img");
-        if (!img) return "";
-
-        return (
-          img.currentSrc ||
-          img.src ||
-          img.getAttribute("data-src") ||
-          img.getAttribute("data-lazy-src") ||
-          ""
-        );
-      }
-
+      const nodes = Array.from(document.querySelectorAll("li.item.product.product-item"));
       const result = [];
-      const cards = document.querySelectorAll("a[href*='product']");
+      const seen = new Set();
 
-      cards.forEach((link) => {
-        const title = txt(link);
-        if (!title) return;
+      for (const el of nodes) {
+        const title = el.querySelector(".product-item-link")?.innerText?.trim() || "";
 
-        const card = link.closest("div");
-        if (!card) return;
+        const price = parsePrice(
+          el.querySelector(".special-price .price")?.innerText
+        );
 
-        const text = txt(card);
-        const prices = text.match(/(\d[\d\s.,]*)/g);
+        const oldPrice = parsePrice(
+          el.querySelector(".old-price .price")?.innerText
+        );
 
-        if (!prices || prices.length < 2) return;
+        const imageUrl = el.querySelector("img.product-image-photo")?.src || "";
+
+        if (!title || !price || !imageUrl) continue;
+
+        const finalOldPrice = oldPrice || price;
+        const key = `${title.toLowerCase()}|${price}|${finalOldPrice}`;
+
+        if (seen.has(key)) continue;
+        seen.add(key);
 
         result.push({
           title,
-          oldPriceText: prices[0],
-          priceText: prices[1],
-          imageUrl: getImg(card)
+          price,
+          oldPrice: finalOldPrice,
+          imageUrl
         });
-      });
+      }
 
       return result;
     });
 
-    const items = rawItems
-      .map((item, i) => {
-        const title = normalizeTitle(item.title);
-        const price = parsePrice(item.priceText);
-        const oldPrice = parsePrice(item.oldPriceText);
-        const imageUrl = normalizeImageUrl(item.imageUrl);
+    const normalized = items.map((item, index) => ({
+      id: String(index + 1),
+      storeId: 6,
+      title: item.title,
+      price: item.price,
+      oldPrice: item.oldPrice,
+      imageUrl: normalizeImage(item.imageUrl),
+      createdAt: Date.now()
+    }));
 
-        if (!title) return null;
-        if (!price || !oldPrice || !(oldPrice > price)) return null;
+    console.log("FOUND:", items.length);
+    console.log("FINAL:", normalized.length);
+    console.log("✅ ROST ITEMS:", normalized.length);
 
-        return {
-          id: String(i + 1),
-          storeId: 6,
-          title,
-          brand: detectBrand(title),
-          price,
-          oldPrice,
-          discountPercent: Math.round(
-            ((oldPrice - price) / oldPrice) * 100
-          ),
-          imageUrl
-        };
-      })
-      .filter(Boolean);
-
-    console.log("✅ FINAL ROST:", items.length);
-
-    return items;
+    return normalized;
+  } catch (e) {
+    console.error("❌ ROST ERROR:", e.message);
+    return [];
   } finally {
-    await browser.close();
+    await browser.close().catch(() => {});
   }
 }
 
-module.exports = { scrapeRost };
+module.exports = {
+  scrapeRost
+};
