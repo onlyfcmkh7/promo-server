@@ -13,6 +13,16 @@ function normalizeImage(url) {
   return url;
 }
 
+function cleanupTitle(title) {
+  return String(title || "")
+    .replace(/^\-\s*\d+%\s*/i, "")
+    .replace(/\s+\d+(?:[.,]\d+)?\s?(г|кг|мл|л|шт)\s+\d+(?:[.,]\d+)?(?:\s*\/5)?$/i, "")
+    .replace(/\s+\d+(?:[.,]\d+)?\s?(г|кг|мл|л|шт)$/i, "")
+    .replace(/\s+\d+(?:[.,]\d+)?\s*\/5$/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function detectCategory(title) {
   const t = String(title || "").toLowerCase();
 
@@ -32,7 +42,7 @@ function detectCategory(title) {
     return "pork";
   }
 
-  if (/\b(телятина|теляч|теляче|ялович)\b/i.test(t)) {
+  if (/\b(телятина|теляч|теляче|ялович|бограч)\b/i.test(t)) {
     return "veal";
   }
 
@@ -120,7 +130,7 @@ async function autoScroll(page) {
         const currentHeight = document.body.scrollHeight;
 
         if (currentHeight === lastHeight) {
-          idle++;
+          idle += 1;
         } else {
           idle = 0;
           lastHeight = currentHeight;
@@ -208,6 +218,7 @@ async function scrapeSilpo() {
 
           if (!src) continue;
           if (/\.svg/i.test(src)) continue;
+          if (/MediaBubbles|Activities|site\.svg|hermes/i.test(src)) continue;
 
           return src;
         }
@@ -221,7 +232,7 @@ async function scrapeSilpo() {
 
       for (const node of nodes) {
         const full = text(node);
-        if (!/грн|₴/.test(full)) continue;
+        if (!/грн|₴/i.test(full)) continue;
 
         const match = full.match(
           /(\d[\d\s.,]*)\s*(?:грн|₴)\s+(\d[\d\s.,]*)\s*(?:грн|₴)\s+(.+)/
@@ -238,8 +249,7 @@ async function scrapeSilpo() {
         const imageUrl = getImage(node);
         if (!imageUrl) continue;
 
-        const key = title.toLowerCase() + price;
-
+        const key = `${title.toLowerCase()}|${price}|${oldPrice || price}`;
         if (seen.has(key)) continue;
         seen.add(key);
 
@@ -254,21 +264,25 @@ async function scrapeSilpo() {
       return result;
     });
 
-    const normalized = items.map((item, index) => ({
-      id: String(index + 1),
-      storeId: 2,
-      title: item.title,
-      category: detectCategory(item.title),
-      brand: detectBrand(item.title),
-      price: item.price,
-      oldPrice: item.oldPrice,
-      discountPercent:
-        item.oldPrice && item.oldPrice > item.price
-          ? Math.round(((item.oldPrice - item.price) / item.oldPrice) * 100)
-          : null,
-      createdAt: Date.now(),
-      imageUrl: normalizeImage(item.imageUrl)
-    }));
+    const normalized = items.map((item, index) => {
+      const cleanTitle = cleanupTitle(item.title);
+
+      return {
+        id: String(index + 1),
+        storeId: 2,
+        title: cleanTitle,
+        category: detectCategory(cleanTitle),
+        brand: detectBrand(cleanTitle),
+        price: item.price,
+        oldPrice: item.oldPrice,
+        discountPercent:
+          item.oldPrice && item.oldPrice > item.price
+            ? Math.round(((item.oldPrice - item.price) / item.oldPrice) * 100)
+            : null,
+        createdAt: Date.now(),
+        imageUrl: normalizeImage(item.imageUrl)
+      };
+    });
 
     console.log("✅ SILPO ITEMS:", normalized.length);
     console.log("SAMPLE:", JSON.stringify(normalized.slice(0, 5), null, 2));
