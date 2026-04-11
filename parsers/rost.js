@@ -99,29 +99,22 @@ async function scrapeRost() {
 
       for (const el of nodes) {
         const title = el.querySelector(".product-item-link")?.innerText?.trim() || "";
+        const imageUrl = el.querySelector("img.product-image-photo")?.src || "";
 
         const price = parsePrice(
-          el.querySelector(".special-price .price")?.innerText
+          el.querySelector(".price-box .price")?.innerText
         );
-
-        const oldPrice = parsePrice(
-          el.querySelector(".old-price .price")?.innerText
-        );
-
-        const imageUrl = el.querySelector("img.product-image-photo")?.src || "";
 
         if (!title || !price || !imageUrl) continue;
 
-        const finalOldPrice = oldPrice || price;
-        const key = `${title.toLowerCase()}|${price}|${finalOldPrice}`;
-
+        const key = `${title.toLowerCase()}|${price}`;
         if (seen.has(key)) continue;
         seen.add(key);
 
         result.push({
           title,
           price,
-          oldPrice: finalOldPrice,
+          oldPrice: price,
           imageUrl
         });
       }
