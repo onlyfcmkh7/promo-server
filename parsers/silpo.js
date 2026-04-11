@@ -23,61 +23,20 @@ function cleanupTitle(title) {
 function detectCategory(title) {
   const t = String(title || "").toLowerCase();
 
-  if (/\b(молоко|кефір|ряжанка|йогурт|сир|творог|кисломолочн|сметан|вершк|масло\b|моцарел|бринз|фет[аи]?|гауд|чедер|пармезан|маскарпоне|рікот|айран|крем-сир)\b/i.test(t)) {
-    return "dairy";
-  }
-
-  if (/\b(хліб|батон|багет|лаваш|булочк|чіабат|бріош|тостов|паляниц|круасан|паск|панеттоне|кекс|тістечко|чизкейк)\b/i.test(t)) {
-    return "bread";
-  }
-
-  if (/\b(курк|куряч|філе кур|стегно кур|гомілка кур|крило кур|стріпс)\b/i.test(t)) {
-    return "chicken";
-  }
-
-  if (/\b(свинин|свиняч|ошийок|ребра свин|лопатка свин|корейка свин)\b/i.test(t)) {
-    return "pork";
-  }
-
-  if (/\b(телятина|теляч|теляче|ялович)\b/i.test(t)) {
-    return "veal";
-  }
-
-  if (/\b(риба|лосос|форел|оселед|скумбр|тунец|тунець|хек|минтай|дорадо|сибас|короп)\b/i.test(t)) {
-    return "fish";
-  }
-
-  if (/\b(кревет|міді|миді|кальмар|морепродукт|восьмин|лангустин|рапан)\b/i.test(t)) {
-    return "seafood";
-  }
-
-  if (/\b(соус|кетчуп|майонез|гірчиц|теріякі|барбекю|bbq|песто|сацебелі|аджика|соєвий)\b/i.test(t)) {
-    return "sauces";
-  }
-
-  if (/\b(олія|оливкова олія|соняшникова олія|кукурудзяна олія|рапсова олія)\b/i.test(t)) {
-    return "oil";
-  }
-
-  if (/\b(шоколад|шоколадка|chocolate)\b/i.test(t)) {
-    return "chocolate";
-  }
-
-  if (/\b(вода|мінеральна вода|газована вода|негазована вода|питна вода)\b/i.test(t)) {
-    return "water";
-  }
-
-  if (/\b(пиво|lager|ale|stout|ipa|porter)\b/i.test(t)) {
-    return "beer";
-  }
-
-  if (/\b(сидр|слабоалкоголь|hard seltzer|алкогольний коктейль|коктейль алкогольний|соджу)\b/i.test(t)) {
-    return "low_alcohol";
-  }
-
-  if (/\b(горілка|віскі|коньяк|ром|джин|текіла|бренді|лікер|настоянка|бурбон)\b/i.test(t)) {
-    return "strong_alcohol";
-  }
+  if (/\b(молоко|кефір|ряжанка|йогурт|сир|творог|кисломолочн|сметан|вершк|масло\b|моцарел|бринз|фет[аи]?|гауд|чедер|пармезан|маскарпоне|рікот|айран|крем-сир)\b/i.test(t)) return "dairy";
+  if (/\b(хліб|батон|багет|лаваш|булочк|чіабат|бріош|тостов|паляниц|круасан|паск|панеттоне|кекс|тістечко|чизкейк)\b/i.test(t)) return "bread";
+  if (/\b(курк|куряч|філе кур|стегно кур|гомілка кур|крило кур|стріпс)\b/i.test(t)) return "chicken";
+  if (/\b(свинин|свиняч|ошийок|ребра свин|лопатка свин|корейка свин)\b/i.test(t)) return "pork";
+  if (/\b(телятина|теляч|теляче|ялович)\b/i.test(t)) return "veal";
+  if (/\b(риба|лосос|форел|оселед|скумбр|тунец|тунець|хек|минтай|дорадо|сибас|короп)\b/i.test(t)) return "fish";
+  if (/\b(кревет|міді|миді|кальмар|морепродукт|восьмин|лангустин|рапан)\b/i.test(t)) return "seafood";
+  if (/\b(соус|кетчуп|майонез|гірчиц|теріякі|барбекю|bbq|песто|сацебелі|аджика|соєвий)\b/i.test(t)) return "sauces";
+  if (/\b(олія|оливкова олія|соняшникова олія|кукурудзяна олія|рапсова олія)\b/i.test(t)) return "oil";
+  if (/\b(шоколад|шоколадка|chocolate)\b/i.test(t)) return "chocolate";
+  if (/\b(вода|мінеральна вода|газована вода|негазована вода|питна вода)\b/i.test(t)) return "water";
+  if (/\b(пиво|lager|ale|stout|ipa|porter)\b/i.test(t)) return "beer";
+  if (/\b(сидр|слабоалкоголь|hard seltzer|алкогольний коктейль|коктейль алкогольний|соджу)\b/i.test(t)) return "low_alcohol";
+  if (/\b(горілка|віскі|коньяк|ром|джин|текіла|бренді|лікер|настоянка|бурбон)\b/i.test(t)) return "strong_alcohol";
 
   return "other";
 }
@@ -103,7 +62,7 @@ async function acceptCookies(page) {
         btn
       );
 
-      if (/прийняти|accept|ok|добре|зрозуміло|погоджуюсь|я погоджуюсь/i.test(text)) {
+      if (/прийняти|accept|ok|добре|зрозуміло|погоджуюсь/i.test(text)) {
         await btn.click().catch(() => {});
         await sleep(1000);
         return;
@@ -144,6 +103,7 @@ async function scrapeSilpo() {
 
   const browser = await puppeteer.launch({
     headless: "new",
+    protocolTimeout: 180000,
     args: [
       "--no-sandbox",
       "--disable-setuid-sandbox",
@@ -153,8 +113,6 @@ async function scrapeSilpo() {
   });
 
   try {
-    console.log("[SILPO] browser launch");
-
     const page = await browser.newPage();
 
     await page.setViewport({ width: 1440, height: 2200 });
@@ -175,16 +133,15 @@ async function scrapeSilpo() {
     });
 
     await sleep(3000);
-
-    console.log("[SILPO] accept cookies");
     await acceptCookies(page);
     await sleep(1500);
 
     console.log("[SILPO] wait content");
+
     await page.waitForFunction(
       () => {
         const text = document.body?.innerText || "";
-        return /грн|₴|ціна|акц/i.test(text);
+        return /грн|₴|акц|знижк/i.test(text);
       },
       { timeout: 20000 }
     ).catch(() => {});
@@ -193,10 +150,10 @@ async function scrapeSilpo() {
     await autoScroll(page);
     await sleep(2500);
 
-    console.log("[SILPO] evaluate");
+    console.log("[SILPO] extract");
 
-    const items = await page.evaluate(() => {
-      function text(el) {
+    const items = await page.$$eval("a[href]", (links) => {
+      function txt(el) {
         return String(el?.innerText || el?.textContent || "")
           .replace(/\s+/g, " ")
           .trim();
@@ -235,110 +192,53 @@ async function scrapeSilpo() {
       }
 
       function getTitle(node) {
-        const selectors = [
-          "[data-testid*='title']",
-          "[class*='title'] a",
-          "[class*='title']",
-          "h1",
-          "h2",
-          "h3",
-          "h4",
-          "a[title]",
-          "img[alt]"
+        const candidates = [
+          ...node.querySelectorAll("[title], h1, h2, h3, h4, h5, span, div, p, img")
         ];
 
-        for (const selector of selectors) {
-          const el = node.querySelector(selector);
-          if (!el) continue;
-
+        for (const el of candidates) {
           const value =
             el.getAttribute?.("title") ||
             el.getAttribute?.("alt") ||
-            text(el);
+            txt(el);
 
           if (!value) continue;
-          if (value.length < 3) continue;
-          if (/грн|₴|купити|додати|акція/i.test(value)) continue;
+          if (value.length < 4) continue;
+          if (/грн|₴|\d+[.,]\d{2}/.test(value)) continue;
+          if (/купити|додати|акц|знижк/i.test(value)) continue;
 
           return value;
-        }
-
-        const lines = text(node)
-          .split(/(?<=\D)\n| {2,}/)
-          .map((s) => s.trim())
-          .filter(Boolean);
-
-        for (const line of lines) {
-          if (line.length < 3) continue;
-          if (/грн|₴|\d+[.,]\d{2}/.test(line)) continue;
-          if (/купити|додати|акція|знижка/i.test(line)) continue;
-          return line;
         }
 
         return "";
       }
 
-      function getPrices(node) {
-        const values = new Set();
-
-        const valueNodes = Array.from(node.querySelectorAll("[value]"));
-        for (const el of valueNodes) {
-          const v = parsePrice(el.getAttribute("value"));
-          if (v && v > 0) values.add(v);
-        }
-
-        const fullText = text(node);
-        const matches = fullText.match(/\d{1,4}(?:[\s]\d{3})*(?:[.,]\d{2})/g) || [];
-
-        for (const raw of matches) {
-          const v = parsePrice(raw);
-          if (v && v > 0) values.add(v);
-        }
-
-        const prices = Array.from(values)
-          .filter((n) => n > 0 && n < 100000)
-          .sort((a, b) => a - b);
-
-        if (prices.length === 0) return { price: null, oldPrice: null };
-        if (prices.length === 1) return { price: prices[0], oldPrice: null };
-
-        return {
-          price: prices[0],
-          oldPrice: prices[prices.length - 1]
-        };
-      }
-
-      const candidateSelectors = [
-        "article",
-        "li",
-        "[class*='product']",
-        "[class*='card']",
-        "[class*='item']",
-        "a[href]"
-      ];
-
-      const nodes = Array.from(
-        new Set(
-          candidateSelectors.flatMap((selector) =>
-            Array.from(document.querySelectorAll(selector))
-          )
-        )
-      );
-
       const result = [];
       const seen = new Set();
 
-      for (const node of nodes) {
-        const full = text(node);
+      for (const link of links) {
+        const href = link.getAttribute("href") || "";
+        const full = txt(link);
+
         if (!/грн|₴/.test(full)) continue;
+        if (full.length > 800) continue;
+        if (!href || href === "#" || href.startsWith("javascript:")) continue;
 
-        const title = getTitle(node);
-        const { price, oldPrice } = getPrices(node);
-        const imageUrl = getImage(node);
+        const pricesRaw = full.match(/\d{1,4}(?:[\s]\d{3})*(?:[.,]\d{2})/g) || [];
+        const prices = pricesRaw
+          .map(parsePrice)
+          .filter((n) => n && n > 0 && n < 100000)
+          .sort((a, b) => a - b);
 
-        if (!title || title.length < 3) continue;
-        if (!price) continue;
-        if (!imageUrl) continue;
+        if (!prices.length) continue;
+
+        const price = prices[0];
+        const oldPrice = prices.length > 1 ? prices[prices.length - 1] : null;
+
+        const title = getTitle(link);
+        const imageUrl = getImage(link);
+
+        if (!title || !price || !imageUrl) continue;
 
         const key = `${title.toLowerCase()}|${price}|${oldPrice || ""}`;
         if (seen.has(key)) continue;
