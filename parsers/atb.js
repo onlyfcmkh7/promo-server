@@ -71,39 +71,52 @@ async function scrapeATB() {
     );
 
     await page.goto(ATB_URL, {
-      waitUntil: "domcontentloaded",
+      waitUntil: "networkidle2",
       timeout: 60000
     });
 
     await sleep(3000);
     await accept18PlusIfNeeded(page);
+
+    // 🔥 ЧЕКАЄМО ПОЯВУ КАРТОК
+    await page.waitForSelector("article.catalog-item", {
+      timeout: 20000
+    });
+
+    // 🔥 СКРОЛ ДЛЯ LAZY LOAD
     await autoScroll(page);
+
+    // 🔥 ЧЕКАЄМО ЩОБ ПІДГРУЗИЛИСЬ
+    await page.waitForFunction(
+      () => document.querySelectorAll("article.catalog-item").length > 100,
+      { timeout: 20000 }
+    ).catch(() => {});
+
     await sleep(2000);
 
     const rawItems = await page.evaluate(() => {
       function parsePrice(str) {
         if (!str) return null;
-        const m = str.replace(',', '.').match(/\d+(\.\d+)?/);
+        const m = str.replace(",", ".").match(/\d+(\.\d+)?/);
         return m ? Number(m[0]) : null;
       }
 
-      const cards = document.querySelectorAll('article.catalog-item');
+      const cards = document.querySelectorAll("article.catalog-item");
       const result = [];
 
       cards.forEach(card => {
         const title =
-          card.querySelector('a')?.innerText?.trim() ||
-          '';
+          card.querySelector("a")?.innerText?.trim() || "";
 
         if (!title) return;
 
-        const priceBlock = [...card.querySelectorAll('*')]
-          .find(el => el.innerText?.includes('грн/шт'));
+        const priceBlock = [...card.querySelectorAll("*")]
+          .find(el => el.innerText?.includes("грн/шт"));
 
         if (!priceBlock) return;
 
         const lines = priceBlock.innerText
-          .split('\n')
+          .split("\n")
           .map(t => t.trim())
           .filter(Boolean);
 
@@ -111,9 +124,9 @@ async function scrapeATB() {
         const oldPrice = parsePrice(lines[1]);
 
         const imageUrl =
-          card.querySelector('img')?.currentSrc ||
-          card.querySelector('img')?.src ||
-          '';
+          card.querySelector("img")?.currentSrc ||
+          card.querySelector("img")?.src ||
+          "";
 
         if (!price) return;
 
