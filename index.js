@@ -130,7 +130,12 @@ function createManualRefreshRoute(key) {
 app.get("/promotions/atb", createCachedRoute("atb"));
 app.get("/promotions/silpo", createCachedRoute("silpo"));
 app.get("/promotions/metro", createCachedRoute("metro"));
-app.get("/promotions/klass", createCachedRoute("klass"));
+
+app.get("/promotions/klass", async (_req, res) => {
+  triggerRefreshIfNeeded("klass");
+  res.json(cache["klass"].items);
+});
+
 app.get("/promotions/vostorg", createCachedRoute("vostorg"));
 app.get("/promotions/rost", createCachedRoute("rost"));
 
@@ -171,6 +176,10 @@ app.listen(PORT, () => {
 
   refreshStore("atb").catch((e) => {
     console.error("[ATB] initial refresh error:", e.message);
+  });
+
+  refreshStore("klass").catch((e) => {
+    console.error("[KLASS] initial refresh error:", e.message);
   });
 
   refreshStore("rost").catch((e) => {
