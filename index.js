@@ -37,6 +37,10 @@ const cache = Object.fromEntries(
   ])
 );
 
+function log(storeName, message) {
+  console.log(`[${storeName}] ${message}`);
+}
+
 function isFresh(entry) {
   if (!entry.updatedAt) return false;
   return Date.now() - new Date(entry.updatedAt).getTime() < CACHE_TTL_MS;
@@ -51,7 +55,7 @@ async function refreshStore(key) {
   }
 
   if (entry.loading) {
-    console.log(`⏳ ${store.name} refresh skipped: already loading`);
+    log(store.name, "refresh skipped: already loading");
     return entry.items;
   }
 
@@ -59,7 +63,7 @@ async function refreshStore(key) {
   entry.error = null;
 
   try {
-    console.log(`🔄 ${store.name} refresh start`);
+    log(store.name, "refresh start");
 
     const items = await store.scraper();
 
@@ -70,15 +74,15 @@ async function refreshStore(key) {
     if (items.length > 0) {
       entry.items = items;
       entry.updatedAt = new Date().toISOString();
-      console.log(`✅ ${store.name} refresh done: ${items.length}`);
+      log(store.name, `refresh done: ${items.length}`);
     } else {
-      console.log(`⚠️ ${store.name} returned 0 items, keeping previous cache`);
+      log(store.name, "returned 0 items, keeping previous cache");
     }
 
     return entry.items;
   } catch (e) {
     entry.error = e.message;
-    console.error(`❌ ${store.name} refresh error:`, e.message);
+    console.error(`[${store.name}] refresh error:`, e.message);
     return entry.items;
   } finally {
     entry.loading = false;
@@ -90,25 +94,36 @@ function triggerRefreshIfNeeded(key) {
 
   if (!isFresh(entry) && !entry.loading) {
     refreshStore(key).catch((e) => {
-      console.error(`${stores[key].name} background refresh error:`, e.message);
+      console.error(`[${stores[key].name}] background refresh error:`, e.message);
     });
   }
 }
 
 function createCachedRoute(key) {
   return async (_req, res) => {
-    triggerRefreshIfNeeded(key);
+    const entry = cache[key];
+
+    if (!isFresh(entry) && !entry.loading && entry.items.length === 0) {
+      await refreshStore(key);
+    } else {
+      triggerRefreshIfNeeded(key);
+    }
+
     res.json(cache[key].items);
   };
 }
 
 function createManualRefreshRoute(key) {
   return async (_req, res) => {
-    refreshStore(key).catch((e) => {
-      console.error(`${stores[key].name} manual refresh error:`, e.message);
-    });
+    const items = await refreshStore(key);
 
-    res.json({ ok: true });
+    res.json({
+      ok: true,
+      store: stores[key].name,
+      count: items.length,
+      updatedAt: cache[key].updatedAt,
+      error: cache[key].error
+    });
   };
 }
 
@@ -144,25 +159,29 @@ app.get("/health", (_req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log("🚀 Server running on", PORT);
+  console.log(`🚀 Server running on ${PORT}`);
 
   refreshStore("silpo").catch((e) => {
-    console.error("SILPO initial refresh error:", e.message);
+    console.error("[SILPO] initial refresh error:", e.message);
   });
 
   refreshStore("vostorg").catch((e) => {
-    console.error("VOSTORG initial refresh error:", e.message);
+    console.error("[VOSTORG] initial refresh error:", e.message);
   });
 
   refreshStore("atb").catch((e) => {
-    console.error("ATB initial refresh error:", e.message);
+    console.error("[ATB] initial refresh error:", e.message);
+  });
+
+  refreshStore("rost").catch((e) => {
+    console.error("[ROST] initial refresh error:", e.message);
   });
 
   setInterval(() => {
     for (const key of Object.keys(stores)) {
       if (cache[key].updatedAt || cache[key].items.length > 0) {
         refreshStore(key).catch((e) => {
-          console.error(`${stores[key].name} interval refresh error:`, e.message);
+          console.error(`[${stores[key].name}] interval refresh error:`, e.message);
         });
       }
     }
